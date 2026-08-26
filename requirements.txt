@@ -1,6 +1,6 @@
 pandas
 requests
+nest_asyncio
 beautifulsoup4
 playwright
 lxml
-nest_asyncio
