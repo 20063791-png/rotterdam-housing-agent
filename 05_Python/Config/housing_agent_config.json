@@ -1,0 +1,28 @@
+{
+    "project_name": "Rotterdam Housing Command Center",
+    "owner": "Grifton Muchovu",
+    "telegram_bot": "@griftonhousingbot",
+    "chat_id": 8674673640,
+    "employer": "Erasmus MC",
+    "job_title": "Scientific Researcher",
+    "gross_salary": 3724,
+    "move_in_date": "2026-10-01",
+    "scan_interval_minutes": 20,
+    "budget": {
+        "room": 900,
+        "studio": 1000,
+        "3_room": 2000,
+        "4_plus": 3000
+    },
+    "preferred_areas": [
+        "Rotterdam",
+        "Schiedam",
+        "Delft",
+        "Capelle aan den IJssel",
+        "Vlaardingen",
+        "Barendrecht",
+        "Ridderkerk",
+        "Spijkenisse",
+        "Dordrecht"
+    ]
+}
