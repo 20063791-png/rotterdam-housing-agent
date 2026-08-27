@@ -1,94 +1,100 @@
-import json
+import os
 import requests
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+BOT_TOKEN = os.getenv(
+    "TELEGRAM_BOT_TOKEN",
+    "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
+)
 
-CONFIG = ROOT/"Config"/"config.json"
-TRACKER = ROOT/"Database"/"housing_tracker.csv"
+CHAT_ID = os.getenv(
+    "TELEGRAM_CHAT_ID",
+    "8674673640"
+)
 
-with open(CONFIG,"r",encoding="utf-8") as f:
-    config=json.load(f)
 
-TOKEN=config["telegram"]["bot_token"]
+def build_ai_message(property_data):
 
-updates=requests.get(
-    f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-).json()
+    title = property_data.get("title","this property")
+    city = property_data.get("city","the Netherlands")
+    price = property_data.get("price","")
 
-if TRACKER.exists():
+    return f"""Hi,
 
-    import pandas as pd
+I am interested in {title} in {city}.
 
-    tracker=pd.read_csv(TRACKER)
+I am a researcher currently based in Italy and relocating to the Netherlands for my new position. I have a stable professional background and I am looking for a long-term place to rent.
 
-    for item in updates.get("result",[]):
+The location and property fit my relocation plans very well, and I would appreciate the opportunity to arrange a viewing.
 
-        callback=item.get("callback_query")
+Thank you for your time and consideration.
 
-        if callback is None:
-            continue
+Kind regards,
 
-        action,index=callback["data"].split("|")
+Grifton Muchovu
+Researcher
+"""
 
-        index=int(index)
 
-        if index>=len(tracker):
-            continue
+def send_property_alert(property_data,index):
 
-        chat=callback["message"]["chat"]["id"]
-        msg=callback["message"]["message_id"]
+    score = property_data.get("score",0)
 
-        if action=="applied":
+    if score >= 90:
+        badge="🔥 HIGH PRIORITY"
+    elif score >=70:
+        badge="⭐ STRONG MATCH"
+    else:
+        badge="📍 NEW LISTING"
 
-            tracker.loc[index,"Status"]="Applied"
+    message=f"""
+🏠 <b>Housing Agent v6</b>
 
-            text="✅ Marked as Applied"
+<b>{badge}</b>
 
-        elif action=="reject":
+📍 <b>{property_data.get('title','')}</b>
+🏙 {property_data.get('city','')}
 
-            tracker.loc[index,"Status"]="Rejected"
+💶 <b>{property_data.get('price','')}</b>
+🛏 {property_data.get('rooms','?')} rooms
+📐 {property_data.get('area','?')} m²
 
-            text="❌ Property Rejected"
+🎯 <b>Score: {score}/100</b>
+"""
 
-        elif action=="message":
-
-            prop=tracker.loc[index]
-
-            text=(
-                f"Hello,\n\n"
-                f"I'm interested in {prop['Title']}.\n\n"
-                f"I would appreciate arranging a viewing.\n\n"
-                f"Kind regards,\n"
-                f"Grifton Muchovu"
-            )
-
-            requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                json={
-                    "chat_id":chat,
-                    "text":text
+    keyboard={
+        "inline_keyboard":[
+            [
+                {
+                    "text":"🏡 Open Listing",
+                    "url":property_data["url"]
                 }
-            )
+            ],
+            [
+                {
+                    "text":"✍️ Copy AI Message",
+                    "callback_data":f"message|{index}"
+                }
+            ],
+            [
+                {
+                    "text":"🟢 Applied",
+                    "callback_data":f"applied|{index}"
+                },
+                {
+                    "text":"❌ Reject",
+                    "callback_data":f"reject|{index}"
+                }
+            ]
+        ]
+    }
 
-            continue
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/editMessageText",
-            json={
-                "chat_id":chat,
-                "message_id":msg,
-                "text":text
-            }
-        )
-
-    tracker.to_csv(TRACKER,index=False)
-
-if updates.get("result"):
-
-    last=max(x["update_id"] for x in updates["result"])
-
-    requests.get(
-        f"https://api.telegram.org/bot{TOKEN}/getUpdates",
-        params={"offset":last+1}
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id":CHAT_ID,
+            "text":message,
+            "parse_mode":"HTML",
+            "reply_markup":keyboard
+        },
+        timeout=20
     )
