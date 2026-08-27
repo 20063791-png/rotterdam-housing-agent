@@ -5,15 +5,11 @@ import asyncio
 from playwright.async_api import async_playwright
 
 # ==========================================================
-# Telegram Configuration
+# Telegram Configuration (RESTORED WORKING VERSION)
 # ==========================================================
 
-# IMPORTANT:
-# GitHub Secrets are used first.
-# If GitHub passes an empty value, "or" makes the fallback work.
-
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "<YOUR_BOT_TOKEN>"
-CHAT_ID = os.getenv("CHAT_ID") or "<YOUR_CHAT_ID>"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
+CHAT_ID = os.getenv("CHAT_ID") or "8674673640"
 
 # ==========================================================
 # Fast Property Detail Extractor
@@ -52,33 +48,25 @@ async def fetch_listing_details(url):
             text = await page.text_content("body") or ""
             lower = text.lower()
 
-            # --------------------------------------------------
-            # Price
-            # --------------------------------------------------
+            # ---------------- Price ----------------
 
             m = re.search(r"€\s?[\d.,]+", text)
             if m:
                 details["price"] = m.group(0)
 
-            # --------------------------------------------------
-            # Rooms
-            # --------------------------------------------------
+            # ---------------- Rooms ----------------
 
             m = re.search(r"(\d+)\s+rooms?", text, re.I)
             if m:
                 details["rooms"] = m.group(1)
 
-            # --------------------------------------------------
-            # Area
-            # --------------------------------------------------
+            # ---------------- Area ----------------
 
             m = re.search(r"(\d+)\s?m²", text)
             if m:
                 details["area"] = m.group(1)
 
-            # --------------------------------------------------
-            # Quick Highlights
-            # --------------------------------------------------
+            # ---------------- Quick Highlights ----------------
 
             keywords = {
                 "balcony": "Balcony",
@@ -99,9 +87,7 @@ async def fetch_listing_details(url):
 
             details["summary"] = details["summary"][:3]
 
-            # --------------------------------------------------
-            # Image
-            # --------------------------------------------------
+            # ---------------- First usable image ----------------
 
             imgs = await page.locator("img").evaluate_all("""
             imgs => imgs
@@ -125,7 +111,7 @@ async def fetch_listing_details(url):
     return details
 
 # ==========================================================
-# AI Message Builder
+# AI Message Builder (Erasmus MC Version)
 # ==========================================================
 
 def build_ai_message(property_data):
@@ -162,7 +148,7 @@ Erasmus MC Researcher"""
 def send_property_alert(property_data, index=0):
 
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram secrets missing.")
+        print("Telegram configuration missing.")
         return
 
     details = asyncio.run(fetch_listing_details(property_data["url"]))
