@@ -21,33 +21,39 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 DATABASE_DIR.mkdir(exist_ok=True)
 
 # ==========================================================
+# Search categories (safe expansion)
+# ==========================================================
+
+SEARCH_TYPES = [
+    "apartments",
+    "houses",
+    "rooms"
+]
+
+# Studios are detected later from URLs/titles because
+# Pararius doesn't expose a reliable studios search page.
+
+# ==========================================================
 # Load configuration
 # ==========================================================
 
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     config = json.load(f)
 
+# ==========================================================
+# Load visited URLs
+# ==========================================================
+
 if VISITED_FILE.exists():
-    visited_urls = set(json.loads(VISITED_FILE.read_text(encoding="utf-8")))
+    visited_urls = set(json.loads(VISITED_FILE.read_text()))
 else:
     visited_urls = set()
 
 # ==========================================================
-# Search categories
+# Score (uses scanner values only)
 # ==========================================================
 
-SEARCH_TYPES = [
-    "apartments",
-    "houses",
-    "studios",
-    "rooms"
-]
-
-# ==========================================================
-# Scoring
-# ==========================================================
-
-def score_listing(city, price, furnished, upholstered, rooms, area, listing_type):
+def score_listing(city, title="", rooms=0, area=0):
 
     score = 0
 
@@ -65,24 +71,9 @@ def score_listing(city, price, furnished, upholstered, rooms, area, listing_type
 
     score += city_points.get(city.lower(),18)
 
-    budget = config["filters"]["maximum_price"]
+    title_lower=title.lower()
 
-    if price:
-
-        ratio = price / budget
-
-        if ratio <= 0.70:
-            score += 30
-        elif ratio <=0.85:
-            score +=25
-        elif ratio<=1:
-            score +=18
-        elif ratio<=1.10:
-            score +=8
-
-    if furnished:
-        score +=20
-    elif upholstered:
+    if "studio" in title_lower:
         score +=10
 
     if rooms in [1,2,3]:
@@ -97,75 +88,7 @@ def score_listing(city, price, furnished, upholstered, rooms, area, listing_type
     elif area>=config["filters"]["minimum_area"]:
         score +=3
 
-    if listing_type=="studio":
-        score +=3
-
     return min(score,100)
-
-# ==========================================================
-# Extract one listing page
-# ==========================================================
-
-async def extract_listing(page,url,default_city):
-
-    await page.goto(url,wait_until="domcontentloaded",timeout=10000)
-    await page.wait_for_timeout(700)
-
-    text = await page.text_content("body") or ""
-    lower=text.lower()
-
-    title=url.split("/")[-1].replace("-"," ").title()
-
-    price=0
-    rooms=0
-    area=0
-
-    m=re.search(r"€\s?([\d.,]+)",text)
-    if m:
-        price=int(m.group(1).replace(".","").replace(",",""))
-
-    m=re.search(r"(\d+)\s+rooms?",text,re.I)
-    if m:
-        rooms=int(m.group(1))
-
-    m=re.search(r"(\d+)\s*m²",text)
-    if m:
-        area=int(m.group(1))
-
-    furnished="furnished" in lower or "gemeubileerd" in lower
-    upholstered="upholstered" in lower or "gestoffeerd" in lower
-
-    if "/studios/" in url or "studio" in lower:
-        listing_type="studio"
-    elif "/houses/" in url:
-        listing_type="house"
-    elif "/rooms/" in url:
-        listing_type="room"
-    else:
-        listing_type="apartment"
-
-    score=score_listing(
-        default_city,
-        price,
-        furnished,
-        upholstered,
-        rooms,
-        area,
-        listing_type
-    )
-
-    return {
-        "city":default_city,
-        "title":title,
-        "price":price,
-        "rooms":rooms,
-        "area":area,
-        "furnished":furnished,
-        "upholstered":upholstered,
-        "type":listing_type,
-        "score":score,
-        "url":url
-    }
 
 # ==========================================================
 # Scan one city
@@ -173,58 +96,85 @@ async def extract_listing(page,url,default_city):
 
 async def scan_city(browser,city):
 
-    slug=city.lower().replace(" ","-")
-
     page=await browser.new_page()
+
     page.set_default_timeout(8000)
 
-    urls=[]
+    await page.set_extra_http_headers({
+        "User-Agent":"Mozilla/5.0"
+    })
+
+    listings=[]
     seen=set()
 
     print(f"Scanning {city}...")
+
+    slug=city.lower().replace(" ","-")
 
     try:
 
         for category in SEARCH_TYPES:
 
-            search=f"{BASE}/{category}/{slug}"
+            url=f"{BASE}/{category}/{slug}"
 
             try:
 
-                await page.goto(search,wait_until="domcontentloaded",timeout=9000)
-                await page.wait_for_timeout(600)
+                await page.goto(url,wait_until="domcontentloaded",timeout=10000)
 
-                links=await page.eval_on_selector_all(
-                    "a[href*='-for-rent/']",
-                    """
-                    els=>[...new Set(
-                        els.map(e=>e.href.startsWith("http")?e.href:"https://www.pararius.com"+e.getAttribute("href"))
-                    )]
-                    """
-                )
+                await page.wait_for_timeout(1200)
 
-                for link in links:
-                    if link not in seen:
-                        seen.add(link)
-                        urls.append(link)
+                cards=page.locator("a[href*='-for-rent/']")
 
-            except:
-                pass
+                count=await cards.count()
 
-        listings=[]
+                for i in range(count):
 
-        detail_page=await browser.new_page()
-        detail_page.set_default_timeout(8000)
+                    card=cards.nth(i)
 
-        for link in urls[:30]:
+                    href=await card.get_attribute("href")
 
-            try:
-                listing=await extract_listing(detail_page,link,city)
-                listings.append(listing)
+                    if not href:
+                        continue
+
+                    link=href if href.startswith("http") else BASE+href
+
+                    if link in seen:
+                        continue
+
+                    seen.add(link)
+
+                    text=await card.locator("xpath=..").inner_text()
+
+                    title=link.split("/")[-1].replace("-"," ").title()
+
+                    rooms=0
+                    area=0
+
+                    m=re.search(r"(\d+)\s+rooms?",text,re.I)
+                    if m:
+                        rooms=int(m.group(1))
+
+                    m=re.search(r"(\d+)\s*m²",text)
+                    if m:
+                        area=int(m.group(1))
+
+                    listings.append({
+
+                        "city":city,
+                        "title":title,
+                        "price":0,
+                        "rooms":rooms,
+                        "area":area,
+                        "furnished":False,
+                        "upholstered":False,
+                        "score":score_listing(city,title,rooms,area),
+                        "url":link
+
+                    })
+
             except:
                 continue
 
-        await detail_page.close()
         await page.close()
 
         print(f"✓ {city}: {len(listings)} listings")
@@ -240,7 +190,7 @@ async def scan_city(browser,city):
         return []
 
 # ==========================================================
-# Production scan
+# Scan all cities
 # ==========================================================
 
 async def production_scan():
@@ -249,21 +199,27 @@ async def production_scan():
 
         browser=await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         )
 
-        tasks=[scan_city(browser,c) for c in config["preferred_locations"]]
+        tasks=[
+            scan_city(browser,c)
+            for c in config["preferred_locations"]
+        ]
 
         results=await asyncio.gather(*tasks)
 
         await browser.close()
 
-    listings=[]
+    all_listings=[]
 
     for r in results:
-        listings.extend(r)
+        all_listings.extend(r)
 
-    return listings
+    return all_listings
 
 # ==========================================================
 # Run
@@ -285,22 +241,21 @@ new_listings=filter_launch_listings(new_listings,config)
 new_listings.sort(key=lambda x:x["score"],reverse=True)
 
 # ==========================================================
-# Debug Top 10
+# Debug
 # ==========================================================
 
 print("="*60)
 print("TOP 10 SCORED LISTINGS")
 print("="*60)
 
-for item in new_listings[:10]:
+for x in new_listings[:10]:
 
     print(
-        f"{item['score']:>3} | "
-        f"{item['city']:<20} | "
-        f"€{item['price']:<5} | "
-        f"{item['rooms']}r | "
-        f"{item['area']}m² | "
-        f"{item['title']}"
+        f"{x['score']:>3} | "
+        f"{x['city']:<20} | "
+        f"{x['rooms']}r | "
+        f"{x['area']}m² | "
+        f"{x['title']}"
     )
 
 # ==========================================================
@@ -309,8 +264,8 @@ for item in new_listings[:10]:
 
 summary={}
 
-for item in all_listings:
-    summary[item["city"]]=summary.get(item["city"],0)+1
+for x in all_listings:
+    summary[x["city"]]=summary.get(x["city"],0)+1
 
 print("="*60)
 print("SCAN SUMMARY")
@@ -332,10 +287,10 @@ print("-"*60)
 print(f"Sending top {min(10,len(new_listings))} alerts...")
 print("-"*60)
 
-for i,item in enumerate(new_listings[:10]):
+for i,x in enumerate(new_listings[:10]):
 
     try:
-        send_property_alert(item,i)
+        send_property_alert(x,i)
     except Exception as e:
         print(e)
 
@@ -351,8 +306,7 @@ with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
 
     if header:
         w.writerow([
-            "Date","City","Title","Price","Rooms","Area",
-            "Furnished","Score","Type","URL"
+            "Date","City","Title","Price","Rooms","Area","Score","URL"
         ])
 
     now=datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -366,9 +320,7 @@ with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
             x["price"],
             x["rooms"],
             x["area"],
-            x["furnished"],
             x["score"],
-            x["type"],
             x["url"]
         ])
 
