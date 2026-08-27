@@ -18,16 +18,8 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 
 DATABASE_DIR.mkdir(exist_ok=True)
 
-# ==================================================
-# Load configuration
-# ==================================================
-
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     config = json.load(f)
-
-# ==================================================
-# Load visited URLs
-# ==================================================
 
 if VISITED_FILE.exists():
     with open(VISITED_FILE, "r", encoding="utf-8") as f:
@@ -35,21 +27,17 @@ if VISITED_FILE.exists():
 else:
     visited_urls = set()
 
-# ==================================================
-# Scoring
-# ==================================================
 
 def score_listing(city):
 
     score = 60
+
     city = city.lower()
 
     if city == "rotterdam":
         score += 20
-
     elif city in ["schiedam", "delft"]:
         score += 15
-
     elif city in [
         "capelle aan den ijssel",
         "vlaardingen",
@@ -60,9 +48,6 @@ def score_listing(city):
 
     return min(score, 100)
 
-# ==================================================
-# Scan one city (Restored Working Version)
-# ==================================================
 
 async def scan_city(browser, city):
 
@@ -88,7 +73,6 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(3000)
 
-        # Keep the selector that already proved reliable.
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
             """
@@ -107,15 +91,16 @@ async def scan_city(browser, city):
 
         for link in links:
 
-            listing_slug = link.split("/")[-1]
-            title = listing_slug.replace("-", " ").title()
+            slug = link.split("/")[-1]
+
+            title = slug.replace("-", " ").title()
 
             listings.append({
                 "city": city,
                 "title": title,
-                "price": "See listing",
-                "rooms": "?",
-                "area": "?",
+                "price": "",
+                "rooms": "",
+                "area": "",
                 "score": score_listing(city),
                 "url": link
             })
@@ -123,6 +108,7 @@ async def scan_city(browser, city):
         print(f"✓ {city}: {len(listings)} listings")
 
         await page.close()
+
         return listings
 
     except Exception as e:
@@ -130,11 +116,9 @@ async def scan_city(browser, city):
         print(f"✗ {city}: {e}")
 
         await page.close()
+
         return []
 
-# ==================================================
-# Production Scan
-# ==================================================
 
 async def production_scan():
 
@@ -154,19 +138,14 @@ async def production_scan():
         print("SCANNING ALL CITIES")
         print("=" * 60)
 
-        # IMPORTANT: Sequential scanning stays.
         for city in config["preferred_locations"]:
 
-            city_listings = await scan_city(browser, city)
-            all_listings.extend(city_listings)
+            all_listings.extend(await scan_city(browser, city))
 
         await browser.close()
 
     return all_listings
 
-# ==================================================
-# Run Scanner
-# ==================================================
 
 all_listings = asyncio.run(production_scan())
 
@@ -179,10 +158,6 @@ new_listings.sort(
     key=lambda x: x["score"],
     reverse=True
 )
-
-# ==================================================
-# Summary
-# ==================================================
 
 print("=" * 60)
 print("SCAN SUMMARY")
@@ -201,22 +176,14 @@ print(f"Total listings found : {len(all_listings)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
-# ==================================================
-# Telegram Alerts (Top 10 only)
-# ==================================================
-
 TOP_LIMIT = 10
 
 print("-" * 60)
 print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
 print("-" * 60)
 
-for index, listing in enumerate(new_listings[:TOP_LIMIT]):
-    send_property_alert(listing, index)
-
-# ==================================================
-# Save Tracker
-# ==================================================
+for i, listing in enumerate(new_listings[:TOP_LIMIT]):
+    send_property_alert(listing, i)
 
 write_header = not TRACKER_FILE.exists()
 
@@ -233,8 +200,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Rooms",
             "Area",
             "Score",
-            "URL",
-            "Status"
+            "URL"
         ])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -249,13 +215,8 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["rooms"],
             item["area"],
             item["score"],
-            item["url"],
-            "New"
+            item["url"]
         ])
-
-# ==================================================
-# Update Visited Database
-# ==================================================
 
 visited_urls.update(item["url"] for item in all_listings)
 
@@ -264,5 +225,4 @@ with open(VISITED_FILE, "w", encoding="utf-8") as f:
 
 print("-" * 60)
 print("Database updated.")
-print(f"Tracker file: {TRACKER_FILE.name}")
 print("-" * 60)
