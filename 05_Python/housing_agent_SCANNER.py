@@ -24,9 +24,17 @@ else:
     visited_urls = set()
 
 
-async def scan_city(page, city):
+async def scan_city(browser, city):
     slug = city.lower().replace(" ", "-")
     url = f"{BASE}/apartments/{slug}"
+
+    page = await browser.new_page()
+
+    page.set_default_timeout(30000)
+
+    await page.set_extra_http_headers({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36"
+    })
 
     print(f"Scanning {city}...")
 
@@ -37,7 +45,6 @@ async def scan_city(page, city):
             timeout=30000
         )
 
-        # Give the page a moment to render listings
         await page.wait_for_timeout(3000)
 
         try:
@@ -47,21 +54,23 @@ async def scan_city(page, city):
             )
         except Exception:
             print(f"✗ {city}: No apartment cards found.")
-            return []
+            await page.close()
+            return city, []
 
         links = await page.eval_on_selector_all(
             "a[href*='/apartment-for-rent/']",
-            """
-            elements => [...new Set(elements.map(e => e.href))]
-            """
+            "els => [...new Set(els.map(e => e.href))]"
         )
 
         print(f"✓ {city}: {len(links)} listings")
-        return links
+
+        await page.close()
+        return city, links
 
     except Exception as e:
         print(f"✗ {city}: {e}")
-        return []
+        await page.close()
+        return city, []
 
 
 async def production_scan():
@@ -74,15 +83,6 @@ async def production_scan():
             ]
         )
 
-        page = await browser.new_page()
-
-        page.set_default_timeout(30000)
-
-        await page.set_extra_http_headers({
-            "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36"
-        })
-
         all_links = {}
 
         print("=" * 60)
@@ -90,14 +90,15 @@ async def production_scan():
         print("=" * 60)
 
         for city in config["preferred_locations"]:
-            all_links[city] = await scan_city(page, city)
+            name, links = await scan_city(browser, city)
+            all_links[name] = links
 
         await browser.close()
 
     return all_links
 
 
-# ---------------- RUN SCANNER ----------------
+# ---------------- RUN ----------------
 
 all_city_links = asyncio.run(production_scan())
 
@@ -125,7 +126,6 @@ print(f"Total listings found : {len(rental_links)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_urls)}")
 
-# Save updated database
 visited_urls.update(rental_links)
 
 with open(VISITED_FILE, "w", encoding="utf-8") as f:
