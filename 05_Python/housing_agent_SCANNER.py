@@ -3,7 +3,6 @@ import csv
 import asyncio
 from pathlib import Path
 from playwright.async_api import async_playwright
-
 from telegram_listener import send_property_alert
 
 BASE = "https://www.pararius.com"
@@ -32,21 +31,39 @@ if VISITED_FILE.exists():
 else:
     visited_urls = set()
 
-
 # --------------------------------------------------
-# Simple scoring (safe version)
+# Scoring system
 # --------------------------------------------------
 def score_listing(url, city):
-    score = 0
+    score = 50
 
-    if city.lower() == "rotterdam":
-        score += 20
+    city_scores = {
+        "rotterdam": 35,
+        "schiedam": 25,
+        "delft": 25,
+        "capelle aan den ijssel": 20,
+        "vlaardingen": 15,
+        "barendrecht": 15,
+        "ridderkerk": 10,
+        "spijkenisse": 10,
+        "dordrecht": 5,
+    }
 
-    return score
+    score += city_scores.get(city.lower(), 0)
 
+    url_lower = url.lower()
+
+    if "studio" in url_lower:
+        score += 5
+    if "house" in url_lower:
+        score += 5
+    if "woning" in url_lower:
+        score += 5
+
+    return min(score, 100)
 
 # --------------------------------------------------
-# Scan one city (WORKING VERSION)
+# Scan one city
 # --------------------------------------------------
 async def scan_city(browser, city):
 
@@ -72,32 +89,45 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(3000)
 
-        await page.wait_for_selector(
+        selectors = [
             "a[href*='/apartment-for-rent/']",
-            timeout=10000
-        )
+            "a[href*='/house-for-rent/']",
+            "a[href*='/studio-for-rent/']",
+            "a[href*='/for-rent/']"
+        ]
 
-        links = await page.eval_on_selector_all(
-            "a[href*='/apartment-for-rent/']",
-            """
-            elements => [...new Set(elements.map(e =>
-                e.href.startsWith('http')
-                    ? e.href
-                    : 'https://www.pararius.com' + e.getAttribute('href')
-            ))]
-            """
-        )
+        links = set()
+
+        for selector in selectors:
+            try:
+                await page.wait_for_selector(selector, timeout=3000)
+
+                found = await page.eval_on_selector_all(
+                    selector,
+                    """
+                    elements => elements.map(e =>
+                        e.href.startsWith('http')
+                            ? e.href
+                            : 'https://www.pararius.com' + e.getAttribute('href')
+                    )
+                    """
+                )
+
+                links.update(found)
+
+            except:
+                pass
 
         listings = []
 
-        for link in links:
+        for link in sorted(links):
 
             listings.append({
                 "city": city,
-                "title": "",
-                "price": "",
-                "rooms": "",
-                "area": "",
+                "title": Path(link).name.replace("-", " ").title(),
+                "price": "See listing",
+                "rooms": "?",
+                "area": "?",
                 "score": score_listing(link, city),
                 "url": link
             })
@@ -115,7 +145,6 @@ async def scan_city(browser, city):
         await page.close()
 
         return []
-
 
 # --------------------------------------------------
 # Production scan
@@ -147,7 +176,6 @@ async def production_scan():
         await browser.close()
 
     return all_listings
-
 
 # --------------------------------------------------
 # Run scanner
@@ -185,7 +213,7 @@ print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
 # --------------------------------------------------
-# Save new listings to Excel-compatible CSV
+# Save new listings
 # --------------------------------------------------
 write_header = not TRACKER_FILE.exists()
 
@@ -196,6 +224,10 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     if write_header:
         writer.writerow([
             "City",
+            "Title",
+            "Price",
+            "Rooms",
+            "Area",
             "Score",
             "URL"
         ])
@@ -204,9 +236,26 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
 
         writer.writerow([
             item["city"],
+            item["title"],
+            item["price"],
+            item["rooms"],
+            item["area"],
             item["score"],
             item["url"]
         ])
+
+# --------------------------------------------------
+# Send Telegram alerts
+# --------------------------------------------------
+print("-" * 60)
+print("Sending Telegram alerts...")
+
+for item in new_listings:
+
+    try:
+        send_property_alert(item)
+    except Exception as e:
+        print(f"Telegram failed: {e}")
 
 # --------------------------------------------------
 # Update visited database
