@@ -1,13 +1,25 @@
 name: Housing Agent
 
 on:
+
   workflow_dispatch:
 
+  schedule:
+
+    # Daytime (08:00–22:00 Italy)
+    - cron: "0,30 6-20 * * *"
+
+    # Night (22:00–08:00 Italy)
+    - cron: "0 22,0,2,4,6 * * *"
+
 jobs:
+
   scan:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v5
 
@@ -19,12 +31,12 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Install Playwright Browser
-        run: |
-          playwright install --with-deps chromium
+          pip install playwright requests
+          playwright install chromium
 
       - name: Run Housing Agent
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           python 05_Python/housing_agent.py
