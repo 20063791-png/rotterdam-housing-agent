@@ -16,9 +16,19 @@ BASE = "https://www.pararius.com"
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / "Config" / "config.json"
+DB_FILE = ROOT / "Database" / "known_urls.json"
 
+# Load configuration
 with open(CONFIG, "r", encoding="utf-8") as f:
     config = json.load(f)
+
+# Load previously seen URLs
+if DB_FILE.exists():
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        visited_urls = set(json.load(f))
+else:
+    visited_urls = set()
+
 
 async def scan_city(browser, city):
 
@@ -40,7 +50,6 @@ async def scan_city(browser, city):
         await page.wait_for_timeout(4000)
 
         html = await page.content()
-
         soup = BeautifulSoup(html, "html.parser")
 
         links = []
@@ -60,7 +69,6 @@ async def scan_city(browser, city):
         print(f"✓ {city:<24} {len(links):>3} listings")
 
         await page.close()
-
         return city, links
 
     except Exception as e:
@@ -68,7 +76,6 @@ async def scan_city(browser, city):
         print(f"✗ {city}: {e}")
 
         await page.close()
-
         return city, []
 
 
@@ -78,19 +85,18 @@ async def production_scan():
 
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-dev-shm-usage"]
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
 
         all_links = {}
 
-        print("="*60)
+        print("=" * 60)
         print("SCANNING ALL CITIES")
-        print("="*60)
+        print("=" * 60)
 
         for city in config["preferred_locations"]:
 
             _, links = await scan_city(browser, city)
-
             all_links[city] = links
 
         await browser.close()
@@ -114,14 +120,20 @@ new_urls = [
     if url not in visited_urls
 ]
 
-print("\n"+"="*60)
+# Update known URLs database
+visited_urls.update(new_urls)
+
+with open(DB_FILE, "w", encoding="utf-8") as f:
+    json.dump(sorted(visited_urls), f, indent=2)
+
+print("\n" + "=" * 60)
 print("SCAN SUMMARY")
-print("="*60)
+print("=" * 60)
 
 for city in config["preferred_locations"]:
     print(f"{city:<24} {len(all_city_links[city]):>3}")
 
-print("-"*60)
+print("-" * 60)
 
 print(f"Total listings found : {len(rental_links)}")
 print(f"Known URLs           : {len(visited_urls)}")
