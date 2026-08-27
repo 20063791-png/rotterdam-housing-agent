@@ -118,7 +118,7 @@ async def scan_city(browser, city):
                 "price": "",
                 "rooms": "",
                 "area": "",
-                "score": score_listing(city, title, config),
+                "score": score_listing(city),
                 "url": link
             })
 
