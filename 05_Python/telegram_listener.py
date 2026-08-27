@@ -1,16 +1,17 @@
 import os
 import requests
 
-BOT_TOKEN = os.getenv("AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
-CHAT_ID = os.getenv("8963641889")
+# Read from GitHub Secrets first, then fall back to hardcoded values
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
 
 
 def send_property_alert(property_data):
     """
-    Sends a beautiful Telegram notification using HTML formatting.
+    Send a clean HTML Telegram notification.
     """
 
-    if not BOT_TOKEN or not CHAT_ID:
+    if BOT_TOKEN == "YOUR_BOT_TOKEN" or CHAT_ID == "YOUR_CHAT_ID":
         print("Telegram secrets missing.")
         return
 
@@ -20,30 +21,32 @@ def send_property_alert(property_data):
     rooms = property_data.get("rooms", "?")
     area = property_data.get("area", "?")
     score = property_data.get("score", 0)
-    url = property_data.get("url")
+    url = property_data.get("url", "")
 
-    if score >= 80:
+    if score >= 90:
         priority = "🔥 HIGH PRIORITY"
+    elif score >= 75:
+        priority = "⭐ STRONG MATCH"
     elif score >= 60:
-        priority = "⭐ GOOD MATCH"
+        priority = "✅ GOOD MATCH"
     else:
-        priority = "📌 NEW LISTING"
+        priority = "🆕 NEW LISTING"
 
     message = f"""
-<b>🏠 Housing Agent v4</b>
+<b>🏡 Housing Agent v4</b>
 
 <b>{priority}</b>
 
 📍 <b>{title}</b>
-🏙 {city}
+🏙️ {city}
 
 💶 <b>{price}</b>
-🚪 {rooms} rooms
+🛏️ {rooms} rooms
 📐 {area} m²
 
 🎯 <b>Score: {score}/100</b>
 
-<a href="{url}">🔗 Open Listing</a>
+<a href="{url}">🏠 Open Listing</a>
 """
 
     requests.post(
