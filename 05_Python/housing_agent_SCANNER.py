@@ -22,7 +22,7 @@ DATABASE_DIR.mkdir(exist_ok=True)
 
 # ==========================================================
 # DEVELOPMENT TEST MODE
-# Set to False after Telegram is confirmed working.
+# Set False after Telegram testing.
 # ==========================================================
 
 TEST_MODE = True
@@ -51,7 +51,6 @@ else:
 def score_listing(city, rooms=0, area=0):
 
     score = 40
-
     city_lower = city.lower()
 
     if city_lower == "rotterdam":
@@ -152,19 +151,17 @@ async def scan_city(browser, city):
                 slug = link.split("/")[-1]
                 title = slug.replace("-", " ").title()
 
-                # Rooms
+                # -------- Rooms --------
 
                 rooms = 0
-
                 m = re.search(r"(\d+)\s+room", text, re.I)
 
                 if m:
                     rooms = int(m.group(1))
 
-                # Area
+                # -------- Area --------
 
                 area = 0
-
                 m = re.search(r"(\d+)\s*m²", text, re.I)
 
                 if m:
@@ -208,7 +205,9 @@ async def production_scan():
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
+
             headless=True,
+
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
@@ -242,19 +241,27 @@ async def production_scan():
 all_listings = asyncio.run(production_scan())
 
 if TEST_MODE:
+
     print("TEST MODE ENABLED - Sending sample listings to Telegram.")
+
     new_listings = all_listings[:10]
+
 else:
+
     new_listings = [
+
         item
         for item in all_listings
         if item["url"] not in visited_urls
+
     ]
 
-new_listings = filter_launch_listings(
-    new_listings,
-    config
-)
+    # Only filter during production
+
+    new_listings = filter_launch_listings(
+        new_listings,
+        config
+    )
 
 # ==========================================================
 # Summary
@@ -291,6 +298,7 @@ for i, listing in enumerate(new_listings[:TOP_LIMIT]):
 
     try:
         send_property_alert(listing, i)
+
     except Exception as e:
         print(f"Telegram failed: {listing['title']} ({e})")
 
