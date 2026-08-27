@@ -62,7 +62,7 @@ def score_listing(city):
     return min(score, 100)
 
 # ==================================================
-# Fast city scanner (stable)
+# Fast city scan (UNCHANGED)
 # ==================================================
 
 async def scan_city(browser, city):
@@ -117,6 +117,7 @@ async def scan_city(browser, city):
                 "price": "",
                 "rooms": "",
                 "area": "",
+                "image": "",
                 "score": score_listing(city),
                 "url": link
             })
@@ -134,6 +135,92 @@ async def scan_city(browser, city):
         await page.close()
 
         return []
+
+# ==================================================
+# NEW: Enrich ONLY the Top 10 listings
+# ==================================================
+
+async def enrich_listing(browser, listing):
+
+    page = await browser.new_page()
+
+    await page.set_extra_http_headers({
+        "User-Agent":
+        "Mozilla/5.0"
+    })
+
+    try:
+
+        await page.goto(
+            listing["url"],
+            wait_until="domcontentloaded",
+            timeout=25000
+        )
+
+        await page.wait_for_timeout(1000)
+
+        try:
+            title = await page.locator("h1").first.inner_text()
+            if title.strip():
+                listing["title"] = title.strip()
+        except:
+            pass
+
+        price_selectors = [
+            "[class*=price]",
+            "text=/€/"
+        ]
+
+        for selector in price_selectors:
+            try:
+                txt = await page.locator(selector).first.inner_text()
+                if "€" in txt:
+                    listing["price"] = txt.strip()
+                    break
+            except:
+                pass
+
+        room_selectors = [
+            "text=/room/i",
+            "[class*=room]"
+        ]
+
+        for selector in room_selectors:
+            try:
+                txt = await page.locator(selector).first.inner_text()
+                if txt:
+                    listing["rooms"] = txt.strip()
+                    break
+            except:
+                pass
+
+        area_selectors = [
+            "text=/m²/i",
+            "text=/sqm/i"
+        ]
+
+        for selector in area_selectors:
+            try:
+                txt = await page.locator(selector).first.inner_text()
+                if txt:
+                    listing["area"] = txt.strip()
+                    break
+            except:
+                pass
+
+        try:
+            img = await page.locator("img").nth(1).get_attribute("src")
+            if img:
+                listing["image"] = img
+        except:
+            pass
+
+    except:
+        pass
+
+    await page.close()
+
+    return listing
 
 # ==================================================
 # Production scan
@@ -159,13 +246,25 @@ async def production_scan():
 
         for city in config["preferred_locations"]:
 
-            city_listings = await scan_city(browser, city)
-
-            all_listings.extend(city_listings)
+            all_listings.extend(await scan_city(browser, city))
 
         await browser.close()
 
     return all_listings
+
+# ==================================================
+# NEW: Enrich Top 10 only
+# ==================================================
+
+async def enrich_top(browser, listings):
+
+    enriched = []
+
+    for listing in listings:
+
+        enriched.append(await enrich_listing(browser, listing))
+
+    return enriched
 
 # ==================================================
 # Run scanner
@@ -182,10 +281,6 @@ new_listings.sort(
     key=lambda x: x["score"],
     reverse=True
 )
-
-# ==================================================
-# Summary
-# ==================================================
 
 print("=" * 60)
 print("SCAN SUMMARY")
@@ -204,17 +299,40 @@ print(f"Total listings found : {len(all_listings)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
-# ==================================================
-# Telegram alerts (Top 10 only)
-# ==================================================
-
 TOP_LIMIT = 10
 
 print("-" * 60)
-print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
+print(f"Enriching top {min(len(new_listings),TOP_LIMIT)} listings...")
 print("-" * 60)
 
-for i, listing in enumerate(new_listings[:TOP_LIMIT]):
+async def enrich_runner():
+
+    async with async_playwright() as p:
+
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+
+        result = await enrich_top(
+            browser,
+            new_listings[:TOP_LIMIT]
+        )
+
+        await browser.close()
+
+        return result
+
+top_listings = asyncio.run(enrich_runner())
+
+print("-" * 60)
+print("Sending Telegram alerts...")
+print("-" * 60)
+
+for i, listing in enumerate(top_listings):
     send_property_alert(listing, i)
 
 # ==================================================
@@ -253,10 +371,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["score"],
             item["url"]
         ])
-
-# ==================================================
-# Update visited database
-# ==================================================
 
 visited_urls.update(item["url"] for item in all_listings)
 
