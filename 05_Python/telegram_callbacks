@@ -1,94 +1,117 @@
+from pathlib import Path
 import json
 import requests
-from pathlib import Path
+import pandas as pd
+from datetime import datetime
 
-ROOT = Path(__file__).resolve().parent
+ROOT=Path(__file__).resolve().parent
 
-CONFIG = ROOT/"Config"/"config.json"
-TRACKER = ROOT/"Database"/"housing_tracker.csv"
+CONFIG=ROOT/"Config/config.json"
+TRACKER=ROOT/"Database/housing_tracker.csv"
+LOG=ROOT/"Database/applications_log.csv"
 
 with open(CONFIG,"r",encoding="utf-8") as f:
-    config=json.load(f)
+    cfg=json.load(f)
 
-TOKEN=config["telegram"]["bot_token"]
+TOKEN=cfg["telegram"]["bot_token"]
+
+tracker=pd.read_csv(TRACKER)
+
+if LOG.exists():
+    log=pd.read_csv(LOG)
+else:
+    log=pd.DataFrame(columns=[
+        "time","url","title","price","decision","status"
+    ])
 
 updates=requests.get(
     f"https://api.telegram.org/bot{TOKEN}/getUpdates"
 ).json()
 
-if TRACKER.exists():
+processed=0
 
-    import pandas as pd
+for item in updates.get("result",[]):
 
-    tracker=pd.read_csv(TRACKER)
+    callback=item.get("callback_query")
 
-    for item in updates.get("result",[]):
+    if callback is None:
+        continue
 
-        callback=item.get("callback_query")
+    action,index=callback["data"].split("|")
+    index=int(index)
 
-        if callback is None:
-            continue
+    prop=tracker.loc[index]
 
-        action,index=callback["data"].split("|")
+    chat=callback["message"]["chat"]["id"]
+    msg=callback["message"]["message_id"]
 
-        index=int(index)
+    if action=="message":
 
-        if index>=len(tracker):
-            continue
+        ai=f"""Hi,
 
-        chat=callback["message"]["chat"]["id"]
-        msg=callback["message"]["message_id"]
+I am interested in {prop['title']} in {prop['city']}.
 
-        if action=="applied":
+I am relocating to the Netherlands for work as a researcher and I am looking for a long-term rental.
 
-            tracker.loc[index,"Status"]="Applied"
+I would appreciate the opportunity to arrange a viewing.
 
-            text="✅ Marked as Applied"
+Kind regards,
 
-        elif action=="reject":
+Grifton Muchovu"""
 
-            tracker.loc[index,"Status"]="Rejected"
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id":chat,
+                "text":ai
+            }
+        )
 
-            text="❌ Property Rejected"
+    elif action=="applied":
 
-        elif action=="message":
+        tracker.loc[index,"status"]="Applied"
 
-            prop=tracker.loc[index]
-
-            text=(
-                f"Hello,\n\n"
-                f"I'm interested in {prop['Title']}.\n\n"
-                f"I would appreciate arranging a viewing.\n\n"
-                f"Kind regards,\n"
-                f"Grifton Muchovu"
-            )
-
-            requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                json={
-                    "chat_id":chat,
-                    "text":text
-                }
-            )
-
-            continue
+        log.loc[len(log)]=[
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            prop["url"],
+            prop["title"],
+            prop["price"],
+            "Applied",
+            "Completed"
+        ]
 
         requests.post(
             f"https://api.telegram.org/bot{TOKEN}/editMessageText",
             json={
                 "chat_id":chat,
                 "message_id":msg,
-                "text":text
+                "text":"🟢 Applied — removed from future alerts."
             }
         )
 
-    tracker.to_csv(TRACKER,index=False)
+    elif action=="reject":
+
+        tracker.loc[index,"status"]="Rejected"
+
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/editMessageText",
+            json={
+                "chat_id":chat,
+                "message_id":msg,
+                "text":"❌ Rejected — removed from future alerts."
+            }
+        )
+
+    processed+=1
+
+tracker.to_csv(TRACKER,index=False)
+log.to_csv(LOG,index=False)
 
 if updates.get("result"):
-
-    last=max(x["update_id"] for x in updates["result"])
-
+    last=max(u["update_id"] for u in updates["result"])
     requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getUpdates",
         params={"offset":last+1}
     )
+
+print(f"Processed {processed} callbacks.")
