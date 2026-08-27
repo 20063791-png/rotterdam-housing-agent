@@ -6,7 +6,10 @@ from pathlib import Path
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-from telegram_listener import send_property_alert
+from telegram_listener import (
+    send_property_alert,
+    fetch_listing_details
+)
 from filtering import filter_launch_listings
 
 BASE = "https://www.pararius.com"
@@ -38,15 +41,13 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Budget-first scoring (100 points)
+# Budget-first scoring
 # ==========================================================
 
 def score_listing(city, price=0, rooms=0, area=0,
                   furnished=False, upholstered=False):
 
     score = 0
-
-    # ---------------- Location (20) ----------------
 
     city_scores = {
         "rotterdam": 20,
@@ -62,76 +63,62 @@ def score_listing(city, price=0, rooms=0, area=0,
 
     score += city_scores.get(city.lower(), 5)
 
-    # ---------------- Budget fit (30) ----------------
+    # ---------------- Budget ----------------
 
     if price:
 
         if price <= 700:
             score += 30
-
         elif price <= 850:
             score += 27
-
         elif price <= 1000:
             score += 24
-
         elif price <= 1200:
             score += 20
-
         elif price <= 1400:
             score += 15
-
         elif price <= 1800:
             score += 8
-
         elif price <= 2500:
             score += 3
-
     else:
         score += 10
 
-    # ---------------- Furnishing (20) ----------------
+    # ---------------- Furnishing ----------------
 
     if furnished:
         score += 20
-
     elif upholstered:
         score += 12
 
-    # ---------------- Occupancy fit (15) ----------------
+    # ---------------- Occupancy ----------------
 
     if rooms in [1, 2, 3]:
         score += 15
-
     elif rooms == 0:
         score += 8
-
     else:
         score += 12
 
-    # ---------------- Area (10) ----------------
+    # ---------------- Area ----------------
 
     if area >= 70:
         score += 10
-
     elif area >= 50:
         score += 8
-
     elif area >= 30:
         score += 5
-
     elif area >= config["filters"]["minimum_area"]:
         score += 3
 
-    # ---------------- Small bonus (5) ----------------
-
+    # Small confidence bonus
     if furnished:
         score += 2
 
     return min(score, 100)
 
 # ==========================================================
-# Scan one city
+# Fast city scanner
 # ==========================================================
 
 async def scan_city(browser, city):
@@ -157,118 +144,48 @@ async def scan_city(browser, city):
             timeout=10000
         )
 
-        await page.wait_for_timeout(1500)
+        await page.wait_for_timeout(1200)
 
-        cards = page.locator("a[href*='-for-rent/']")
-        count = await cards.count()
+        links = await page.eval_on_selector_all(
+            "a[href*='-for-rent/']",
+            """
+            elements => [...new Set(
+                elements
+                    .map(e => e.href.startsWith('http')
+                        ? e.href
+                        : 'https://www.pararius.com'+e.getAttribute('href'))
+            )]
+            """
+        )
 
         listings = []
-        seen = set()
 
-        for i in range(count):
+        for link in links:
 
-            card = cards.nth(i)
+            parts = link.rstrip("/").split("/")
 
-            try:
-
-                href = await card.get_attribute("href")
-
-                if not href:
-                    continue
-
-                link = href if href.startswith("http") else BASE + href
-
-                if link in seen:
-                    continue
-
-                seen.add(link)
-
-                text = await card.locator("xpath=..").inner_text()
-
-                slug = link.split("/")[-1]
-                title = slug.replace("-", " ").title()
-
-                # ======================================================
-                # FIXED CITY DETECTION
-                # Example:
-                # /apartment-for-rent/rotterdam/58f5263c/willem-buytewechstraat
-                # city is index -3
-                # ======================================================
-
-                parts = link.rstrip("/").split("/")
-
-                if len(parts) >= 3:
-                    city_slug = parts[-3]
-                    detected_city = city_slug.replace("-", " ").title()
-                else:
-                    detected_city = city
-
-                # ---------------- Price ----------------
-
-                price = 0
-
-                m = re.search(r"€\s*([\d.,]+)", text)
-
-                if m:
-                    digits = re.sub(r"[^\d]", "", m.group(1))
-                    if digits:
-                        price = int(digits)
-
-                # ---------------- Rooms ----------------
-
-                rooms = 0
-
-                m = re.search(r"(\d+)\s*rooms?", text, re.I)
-
-                if m:
-                    rooms = int(m.group(1))
-
-                # ---------------- Area ----------------
-
-                area = 0
-
-                m = re.search(r"(\d+)\s*m²", text, re.I)
-
-                if m:
-                    area = int(m.group(1))
-
-                # ---------------- Furnishing ----------------
-
-                lower = text.lower()
-
-                furnished = (
-                    "furnished" in lower or
-                    "gemeubileerd" in lower
-                )
-
-                upholstered = (
-                    "upholstered" in lower or
-                    "gestoffeerd" in lower
-                )
-
-                listings.append({
-
-                    "city": detected_city,
-                    "title": title,
-                    "price": price,
-                    "rooms": rooms,
-                    "area": area,
-                    "furnished": furnished,
-                    "upholstered": upholstered,
-                    "score": score_listing(
-                        detected_city,
-                        price,
-                        rooms,
-                        area,
-                        furnished,
-                        upholstered
-                    ),
-                    "url": link
-
-                })
-
-            except:
+            if len(parts) < 3:
                 continue
+
+            detected_city = parts[-2].replace("-", " ").title()
+            title = parts[-1].replace("-", " ").title()
+
+            listings.append({
+
+                "city": detected_city,
+                "title": title,
+
+                # Filled later
+                "price": 0,
+                "rooms": 0,
+                "area": 0,
+                "furnished": False,
+                "upholstered": False,
+                "score": 0,
+
+                "url": link
+
+            })
 
         print(f"✓ {city}: {len(listings)} listings")
 
@@ -293,9 +210,7 @@ async def production_scan():
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-
             headless=True,
-
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
@@ -323,44 +238,52 @@ async def production_scan():
     return all_listings
 
 # ==========================================================
+# Enrich NEW listings only
+# ==========================================================
+
+async def enrich_listing(listing):
+
+    details = await fetch_listing_details(listing["url"])
+
+    if details["price"]:
+
+        digits = re.sub(r"[^\d]", "", details["price"])
+
+        if digits:
+            listing["price"] = int(digits)
+
+    if details["rooms"]:
+        listing["rooms"] = int(details["rooms"])
+
+    if details["area"]:
+        listing["area"] = int(details["area"])
+
+    listing["furnished"] = details["furnished"]
+    listing["upholstered"] = details["upholstered"]
+
+    listing["score"] = score_listing(
+        listing["city"],
+        listing["price"],
+        listing["rooms"],
+        listing["area"],
+        listing["furnished"],
+        listing["upholstered"]
+    )
+
+    return listing
+
+
+async def enrich_all(listings):
+
+    tasks = [enrich_listing(x) for x in listings]
+
+    return await asyncio.gather(*tasks)
+
+# ==========================================================
 # Run scanner
 # ==========================================================
 
 all_listings = asyncio.run(production_scan())
-
-# Sort ALL listings for debugging
-all_listings.sort(key=lambda x: x["score"], reverse=True)
-
-# ==========================================================
-# DEBUG LEADERBOARD
-# ==========================================================
-
-print("=" * 60)
-print("TOP 10 SCORED LISTINGS")
-print("=" * 60)
-
-for x in all_listings[:10]:
-
-    price = f"€{x['price']}" if x["price"] else "Unknown"
-
-    furn = (
-        " Furnished"
-        if x.get("furnished")
-        else " Upholstered"
-        if x.get("upholstered")
-        else ""
-    )
-
-    print(
-        f"{x['score']:>3} | "
-        f"{x['city']:<22} | "
-        f"{price:<8} | "
-        f"{x['rooms']}r | "
-        f"{x['area']}m² | "
-        f"{x['title']}{furn}"
-    )
-
-# Production mode only
 
 new_listings = [
 
@@ -375,10 +298,43 @@ new_listings = filter_launch_listings(
     config
 )
 
+# Only open detail pages for NEW listings.
+new_listings = asyncio.run(enrich_all(new_listings))
+
 new_listings.sort(
     key=lambda x: x["score"],
     reverse=True
 )
+
+# ==========================================================
+# Debug leaderboard
+# ==========================================================
+
+print("=" * 60)
+print("TOP 10 SCORED LISTINGS")
+print("=" * 60)
+
+for x in new_listings[:10]:
+
+    price = f"€{x['price']}" if x["price"] else "—"
+
+    status = []
+
+    if x["furnished"]:
+        status.append("Furnished")
+
+    elif x["upholstered"]:
+        status.append("Upholstered")
+
+    print(
+        f"{x['score']:>3} | "
+        f"{x['city']:<20} | "
+        f"{price:<8} | "
+        f"{x['rooms']}r | "
+        f"{x['area']}m² | "
+        f"{x['title']} "
+        f"{' • '.join(status)}"
+    )
 
 # ==========================================================
 # Summary
@@ -394,7 +350,7 @@ for item in all_listings:
     summary[item["city"]] = summary.get(item["city"], 0) + 1
 
 for city in config["preferred_locations"]:
-    print(f"{city:<24} {summary.get(city,0)}")
+    print(f"{city:<24} {summary.get(city.title(),0)}")
 
 print("-" * 60)
 print(f"Total listings found : {len(all_listings)}")
@@ -402,7 +358,7 @@ print(f"Known URLs           : {len(visited_urls)}")
 print(f"Listings to send     : {len(new_listings)}")
 
 # ==========================================================
-# Telegram alerts
+# Telegram
 # ==========================================================
 
 TOP_LIMIT = 10
@@ -437,6 +393,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Price",
             "Rooms",
             "Area",
+            "Furnished",
             "Score",
             "URL"
         ])
@@ -452,6 +409,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["price"],
             item["rooms"],
             item["area"],
+            item["furnished"],
             item["score"],
             item["url"]
         ])
