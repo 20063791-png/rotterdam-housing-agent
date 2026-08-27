@@ -57,5 +57,14 @@ def send_property_alert(property_data):
             "parse_mode": "HTML",
             "disable_web_page_preview": False,
         },
+
+        if __name__ == "__main__":
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": "✅ Housing Agent Telegram test successful."
+        }
+    )
         timeout=20,
     )
