@@ -1,6 +1,7 @@
 import json
 import csv
 import asyncio
+import re
 from pathlib import Path
 from datetime import datetime
 from playwright.async_api import async_playwright
@@ -37,30 +38,58 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Stable scoring (Run #42)
+# Smart scoring
 # ==========================================================
 
-def score_listing(city):
+def score_listing(city, rooms=0, area=0):
 
-    score = 60
+    score = 40
 
-    city = city.lower()
+    city_lower = city.lower()
 
-    if city == "rotterdam":
-        score += 20
+    if city_lower == "rotterdam":
+        score += config["scoring"]["rotterdam_bonus"]
 
-    elif city in ["schiedam", "delft"]:
-        score += 15
+    elif city_lower in ["schiedam", "delft"]:
+        score += config["scoring"]["schiedam_bonus"]
 
-    elif city in [
+    elif city_lower in [
         "capelle aan den ijssel",
         "vlaardingen",
         "barendrecht",
         "ridderkerk"
     ]:
+        score += config["scoring"]["nearby_bonus"]
+
+    elif city_lower in ["spijkenisse", "dordrecht"]:
+        score += config["scoring"]["outer_bonus"]
+
+    # Rooms bonus
+
+    if rooms >= 3:
+        score += 15
+
+    elif rooms == 2:
         score += 10
 
-    return min(score, 100)
+    elif rooms == 1:
+        score += 5
+
+    # Area bonus
+
+    if area >= 70:
+        score += 12
+
+    elif area >= 50:
+        score += 8
+
+    elif area >= 30:
+        score += 5
+
+    elif area >= config["filters"]["minimum_area"]:
+        score += 2
+
+    return max(0, min(score, 100))
 
 # ==========================================================
 # Scan one city
@@ -69,6 +98,7 @@ def score_listing(city):
 async def scan_city(browser, city):
 
     page = await browser.new_page()
+
     page.set_default_timeout(8000)
 
     await page.set_extra_http_headers({
@@ -91,36 +121,66 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(1500)
 
-        links = await page.eval_on_selector_all(
-            "a[href*='-for-rent/']",
-            """
-            elements => [...new Set(
-                elements
-                    .map(e =>
-                        e.href.startsWith('http')
-                            ? e.href
-                            : 'https://www.pararius.com'+e.getAttribute('href'))
-                    .filter(h => h.includes('-for-rent/'))
-            )]
-            """
-        )
+        cards = page.locator("a[href*='-for-rent/']")
+        count = await cards.count()
 
         listings = []
+        seen = set()
 
-        for link in links:
+        for i in range(count):
 
-            slug = link.split("/")[-1]
-            title = slug.replace("-", " ").title()
+            card = cards.nth(i)
 
-            listings.append({
-                "city": city,
-                "title": title,
-                "price": "",
-                "rooms": "",
-                "area": "",
-                "score": score_listing(city),
-                "url": link
-            })
+            try:
+                href = await card.get_attribute("href")
+
+                if not href:
+                    continue
+
+                link = href if href.startswith("http") else BASE + href
+
+                if link in seen:
+                    continue
+
+                seen.add(link)
+
+                text = await card.locator("xpath=..").inner_text()
+
+                slug = link.split("/")[-1]
+                title = slug.replace("-", " ").title()
+
+                # -------- Rooms --------
+
+                rooms = 0
+
+                m = re.search(r"(\d+)\s+room", text, re.I)
+
+                if m:
+                    rooms = int(m.group(1))
+
+                # -------- Area --------
+
+                area = 0
+
+                m = re.search(r"(\d+)\s*m²", text, re.I)
+
+                if m:
+                    area = int(m.group(1))
+
+                listings.append({
+
+                    "city": city,
+                    "title": title,
+                    "price": "",
+                    "rooms": rooms,
+                    "area": area,
+                    "score": score_listing(city, rooms, area),
+                    "url": link
+
+                })
+
+            except:
+                continue
 
         print(f"✓ {city}: {len(listings)} listings")
 
@@ -137,7 +197,7 @@ async def scan_city(browser, city):
         return []
 
 # ==========================================================
-# Scan all cities (concurrent)
+# Scan all cities
 # ==========================================================
 
 async def production_scan():
@@ -145,7 +205,9 @@ async def production_scan():
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
+
             headless=True,
+
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
@@ -179,8 +241,11 @@ async def production_scan():
 all_listings = asyncio.run(production_scan())
 
 new_listings = [
-    item for item in all_listings
+
+    item
+    for item in all_listings
     if item["url"] not in visited_urls
+
 ]
 
 new_listings = filter_launch_listings(
@@ -238,7 +303,9 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
 
     if write_header:
+
         writer.writerow([
+
             "Date",
             "City",
             "Title",
@@ -247,6 +314,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Area",
             "Score",
             "URL"
+
         ])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -254,6 +322,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     for item in new_listings:
 
         writer.writerow([
+
             now,
             item["city"],
             item["title"],
@@ -262,6 +331,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["area"],
             item["score"],
             item["url"]
+
         ])
 
 # ==========================================================
