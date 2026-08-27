@@ -4,27 +4,17 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Daytime (08:00–22:00 Italy)
-    # GitHub cron uses UTC.
-    # 06:00–20:30 UTC = 08:00–22:30 Italy during DST.
+    # Daytime (08:00–22:00 Italy) every 30 minutes
     - cron: "0,30 6-20 * * *"
 
-    # Night (22:00–08:00 Italy)
-    # Every 2 hours.
-    - cron: "20,22,0,2,4,6 * * *"
-
-concurrency:
-  group: housing-agent
-  cancel-in-progress: true
+    # Night (22:00–08:00 Italy) every 2 hours
+    - cron: "0 22,0,2,4,6 * * *"
 
 jobs:
   scan:
-
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v5
 
