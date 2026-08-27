@@ -15,9 +15,15 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 
 DATABASE_DIR.mkdir(exist_ok=True)
 
+# --------------------------------------------------
+# Load configuration
+# --------------------------------------------------
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     config = json.load(f)
 
+# --------------------------------------------------
+# Load visited URLs
+# --------------------------------------------------
 if VISITED_FILE.exists():
     with open(VISITED_FILE, "r", encoding="utf-8") as f:
         visited_urls = set(json.load(f))
@@ -25,50 +31,21 @@ else:
     visited_urls = set()
 
 
-# -----------------------------
-# Score listings
-# -----------------------------
-def score_listing(price, rooms, area):
+# --------------------------------------------------
+# Simple scoring (safe version)
+# --------------------------------------------------
+def score_listing(url, city):
     score = 0
 
-    try:
-        p = int("".join(c for c in price if c.isdigit()))
-    except:
-        p = 999999
-
-    try:
-        r = int(rooms)
-    except:
-        r = 0
-
-    try:
-        a = int(area)
-    except:
-        a = 0
-
-    if p <= 1200:
-        score += 40
-    elif p <= 1500:
-        score += 25
-    elif p <= 1800:
-        score += 10
-
-    if r >= 2:
-        score += 25
-    elif r == 1:
-        score += 15
-
-    if a >= 60:
+    if city.lower() == "rotterdam":
         score += 20
-    elif a >= 40:
-        score += 10
 
     return score
 
 
-# -----------------------------
-# Scan one city
-# -----------------------------
+# --------------------------------------------------
+# Scan one city (WORKING VERSION)
+# --------------------------------------------------
 async def scan_city(browser, city):
 
     page = await browser.new_page()
@@ -93,64 +70,39 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(3000)
 
-        cards = await page.locator("section.search-list__item").all()
+        await page.wait_for_selector(
+            "a[href*='/apartment-for-rent/']",
+            timeout=10000
+        )
 
-        if len(cards) == 0:
-            cards = await page.locator("article").all()
+        links = await page.eval_on_selector_all(
+            "a[href*='/apartment-for-rent/']",
+            """
+            elements => [...new Set(elements.map(e =>
+                e.href.startsWith('http')
+                    ? e.href
+                    : 'https://www.pararius.com' + e.getAttribute('href')
+            ))]
+            """
+        )
 
         listings = []
 
-        for card in cards:
+        for link in links:
 
-            try:
-
-                title = await card.locator("a[href*='/apartment-for-rent/']").first.inner_text(timeout=500)
-                href = await card.locator("a[href*='/apartment-for-rent/']").first.get_attribute("href")
-
-                if not href:
-                    continue
-
-                if href.startswith("/"):
-                    href = BASE + href
-
-                text = await card.inner_text()
-
-                price = ""
-                rooms = ""
-                area = ""
-
-                import re
-
-                p = re.search(r"€[\d,.]+", text)
-                if p:
-                    price = p.group()
-
-                r = re.search(r"(\d+)\s+rooms?", text)
-                if r:
-                    rooms = r.group(1)
-
-                a = re.search(r"(\d+)\s*m²", text)
-                if a:
-                    area = a.group(1)
-
-                score = score_listing(price, rooms, area)
-
-                listings.append({
-                    "city": city,
-                    "title": title,
-                    "price": price,
-                    "rooms": rooms,
-                    "area": area,
-                    "score": score,
-                    "url": href
-                })
-
-            except:
-                continue
-
-        await page.close()
+            listings.append({
+                "city": city,
+                "title": "",
+                "price": "",
+                "rooms": "",
+                "area": "",
+                "score": score_listing(link, city),
+                "url": link
+            })
 
         print(f"✓ {city}: {len(listings)} listings")
+
+        await page.close()
 
         return listings
 
@@ -163,16 +115,19 @@ async def scan_city(browser, city):
         return []
 
 
-# -----------------------------
+# --------------------------------------------------
 # Production scan
-# -----------------------------
+# --------------------------------------------------
 async def production_scan():
 
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         )
 
         all_listings = []
@@ -182,7 +137,9 @@ async def production_scan():
         print("=" * 60)
 
         for city in config["preferred_locations"]:
+
             city_listings = await scan_city(browser, city)
+
             all_listings.extend(city_listings)
 
         await browser.close()
@@ -190,9 +147,9 @@ async def production_scan():
     return all_listings
 
 
-# -----------------------------
-# Run
-# -----------------------------
+# --------------------------------------------------
+# Run scanner
+# --------------------------------------------------
 all_listings = asyncio.run(production_scan())
 
 new_listings = [
@@ -200,8 +157,14 @@ new_listings = [
     if x["url"] not in visited_urls
 ]
 
-new_listings.sort(key=lambda x: x["score"], reverse=True)
+new_listings.sort(
+    key=lambda x: x["score"],
+    reverse=True
+)
 
+# --------------------------------------------------
+# Summary
+# --------------------------------------------------
 print("=" * 60)
 print("SCAN SUMMARY")
 print("=" * 60)
@@ -219,9 +182,9 @@ print(f"Total listings found : {len(all_listings)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
-# -----------------------------
-# Save tracker CSV
-# -----------------------------
+# --------------------------------------------------
+# Save new listings to Excel-compatible CSV
+# --------------------------------------------------
 write_header = not TRACKER_FILE.exists()
 
 with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
@@ -231,29 +194,27 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     if write_header:
         writer.writerow([
             "City",
-            "Title",
-            "Price",
-            "Rooms",
-            "Area",
             "Score",
             "URL"
         ])
 
     for item in new_listings:
+
         writer.writerow([
             item["city"],
-            item["title"],
-            item["price"],
-            item["rooms"],
-            item["area"],
             item["score"],
             item["url"]
         ])
 
-# -----------------------------
+# --------------------------------------------------
 # Update visited database
-# -----------------------------
-visited_urls.update(x["url"] for x in all_listings)
+# --------------------------------------------------
+visited_urls.update(item["url"] for item in all_listings)
 
 with open(VISITED_FILE, "w", encoding="utf-8") as f:
     json.dump(sorted(visited_urls), f, indent=2)
+
+print("-" * 60)
+print("Database updated.")
+print(f"Tracker file: {TRACKER_FILE.name}")
+print("-" * 60)
