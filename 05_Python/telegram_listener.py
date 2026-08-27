@@ -8,15 +8,12 @@ from playwright.async_api import async_playwright
 # Telegram Configuration
 # ==========================================================
 
-BOT_TOKEN = os.getenv(
-    "BOT_TOKEN",
-    "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
-)
+# IMPORTANT:
+# GitHub Secrets are used first.
+# If GitHub passes an empty value, "or" makes the fallback work.
 
-CHAT_ID = os.getenv(
-    "CHAT_ID",
-    "8674673640"
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "<YOUR_BOT_TOKEN>"
+CHAT_ID = os.getenv("CHAT_ID") or "<YOUR_CHAT_ID>"
 
 # ==========================================================
 # Fast Property Detail Extractor
@@ -52,7 +49,7 @@ async def fetch_listing_details(url):
 
             await page.wait_for_timeout(800)
 
-            text = await page.text_content("body")
+            text = await page.text_content("body") or ""
             lower = text.lower()
 
             # --------------------------------------------------
@@ -128,7 +125,7 @@ async def fetch_listing_details(url):
     return details
 
 # ==========================================================
-# AI Message Builder (Launch Version)
+# AI Message Builder
 # ==========================================================
 
 def build_ai_message(property_data):
@@ -239,7 +236,7 @@ def send_property_alert(property_data, index=0):
     }
 
     # ======================================================
-    # Try sending photo first
+    # Try Photo First
     # ======================================================
 
     if details["image"]:
@@ -266,7 +263,7 @@ def send_property_alert(property_data, index=0):
         )
 
     # ======================================================
-    # Guaranteed fallback
+    # Guaranteed Text Fallback
     # ======================================================
 
     text_response = requests.post(
