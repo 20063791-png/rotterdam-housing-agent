@@ -216,8 +216,8 @@ print("-" * 60)
 print(f"Sending top {min(len(new_listings),TOP_LIMIT)} alerts...")
 print("-" * 60)
 
-for listing in new_listings[:TOP_LIMIT]:
-    send_property_alert(listing)
+for i, listing in enumerate(new_listings[:TOP_LIMIT]):
+    send_property_alert(listing, i)
 
 # ==================================================
 # Save Tracker
