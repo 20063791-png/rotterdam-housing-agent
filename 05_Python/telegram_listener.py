@@ -11,7 +11,7 @@ def send_property_alert(property_data):
     Send a clean HTML Telegram notification.
     """
 
-    if BOT_TOKEN == "YOUR_BOT_TOKEN" or CHAT_ID == "YOUR_CHAT_ID":
+    if BOT_TOKEN == "AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc" or CHAT_ID == "8963641889":
         print("Telegram secrets missing.")
         return
 
