@@ -2,6 +2,7 @@ import json
 import csv
 import asyncio
 from pathlib import Path
+from datetime import datetime
 from playwright.async_api import async_playwright
 
 from telegram_listener import send_property_alert
@@ -17,16 +18,16 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 
 DATABASE_DIR.mkdir(exist_ok=True)
 
-# --------------------------------------------------
+# ==================================================
 # Load configuration
-# --------------------------------------------------
+# ==================================================
 
 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     config = json.load(f)
 
-# --------------------------------------------------
+# ==================================================
 # Load visited URLs
-# --------------------------------------------------
+# ==================================================
 
 if VISITED_FILE.exists():
     with open(VISITED_FILE, "r", encoding="utf-8") as f:
@@ -34,44 +35,35 @@ if VISITED_FILE.exists():
 else:
     visited_urls = set()
 
-# --------------------------------------------------
+# ==================================================
 # Scoring
-# --------------------------------------------------
+# ==================================================
 
+def score_listing(city):
 
-def score_listing(city, price, rooms, area):
-
-    score = 50
+    score = 60
 
     city = city.lower()
 
     if city == "rotterdam":
         score += 20
+
     elif city in ["schiedam", "delft"]:
         score += 15
-    elif city in ["capelle aan den ijssel", "vlaardingen"]:
+
+    elif city in [
+        "capelle aan den ijssel",
+        "vlaardingen",
+        "barendrecht",
+        "ridderkerk"
+    ]:
         score += 10
-
-    if isinstance(price, int):
-        if price <= 1200:
-            score += 20
-        elif price <= 1500:
-            score += 10
-
-    if isinstance(area, int):
-        if area >= 45:
-            score += 10
-
-    if isinstance(rooms, int):
-        if rooms >= 2:
-            score += 10
 
     return min(score, 100)
 
-# --------------------------------------------------
-# Scan one city
-# --------------------------------------------------
-
+# ==================================================
+# Scan one city (Restored Working Version)
+# ==================================================
 
 async def scan_city(browser, city):
 
@@ -95,123 +87,41 @@ async def scan_city(browser, city):
             timeout=60000
         )
 
-        await page.wait_for_timeout(2500)
+        await page.wait_for_timeout(3000)
 
-        await page.wait_for_selector(
-            "a[href*='-for-rent/'], a[href*='/apartment-for-rent/']",
-            timeout=15000
-        )
+        # ---- This is the selector that worked before ----
 
-        cards = await page.query_selector_all(
-            "section.search-list__item, div.search-list__item, article"
+        links = await page.eval_on_selector_all(
+            "a[href*='-for-rent/']",
+            """
+            elements => [...new Set(
+                elements
+                    .map(e =>
+                        e.href.startsWith('http')
+                            ? e.href
+                            : 'https://www.pararius.com'+e.getAttribute('href'))
+                    .filter(h => h.includes('-for-rent/'))
+            )]
+            """
         )
 
         listings = []
 
-        seen = set()
+        for link in links:
 
-        if cards:
+            slug = link.split("/")[-1]
 
-            for card in cards:
+            title = slug.replace("-", " ").title()
 
-                link = await card.query_selector(
-                    "a[href*='-for-rent/'], a[href*='/apartment-for-rent/']"
-                )
-
-                if not link:
-                    continue
-
-                href = await link.get_attribute("href")
-
-                if not href:
-                    continue
-
-                full_url = href if href.startswith(
-                    "http") else BASE + href
-
-                if full_url in seen:
-                    continue
-
-                seen.add(full_url)
-
-                title = ""
-                price = ""
-                rooms = "?"
-                area = "?"
-
-                try:
-                    title = (await link.inner_text()).strip()
-                except:
-                    pass
-
-                try:
-                    text = (await card.inner_text()).replace("\n", " ")
-
-                    import re
-
-                    p = re.search(r"€\s*([\d.,]+)", text)
-                    if p:
-                        price = "€" + p.group(1)
-
-                    r = re.search(r"(\d+)\s*rooms?", text, re.I)
-                    if r:
-                        rooms = int(r.group(1))
-
-                    a = re.search(r"(\d+)\s*m²", text)
-                    if a:
-                        area = int(a.group(1))
-
-                except:
-                    pass
-
-                price_number = None
-                if price:
-                    try:
-                        price_number = int(
-                            price.replace("€", "")
-                            .replace(".", "")
-                            .replace(",", "")
-                        )
-                    except:
-                        pass
-
-                score = score_listing(
-                    city,
-                    price_number,
-                    rooms if isinstance(rooms, int) else None,
-                    area if isinstance(area, int) else None
-                )
-
-                listings.append({
-                    "city": city,
-                    "title": title if title else "See listing",
-                    "price": price if price else "See listing",
-                    "rooms": rooms,
-                    "area": area,
-                    "score": score,
-                    "url": full_url
-                })
-
-        else:
-
-            links = await page.eval_on_selector_all(
-                "a[href*='-for-rent/'], a[href*='/apartment-for-rent/']",
-                """
-                elements => [...new Set(elements.map(e=>e.href))]
-                """
-            )
-
-            for link in links:
-
-                listings.append({
-                    "city": city,
-                    "title": "See listing",
-                    "price": "See listing",
-                    "rooms": "?",
-                    "area": "?",
-                    "score": score_listing(city, None, None, None),
-                    "url": link
-                })
+            listings.append({
+                "city": city,
+                "title": title,
+                "price": "See listing",
+                "rooms": "?",
+                "area": "?",
+                "score": score_listing(city),
+                "url": link
+            })
 
         print(f"✓ {city}: {len(listings)} listings")
 
@@ -227,10 +137,9 @@ async def scan_city(browser, city):
 
         return []
 
-# --------------------------------------------------
-# Production scan
-# --------------------------------------------------
-
+# ==================================================
+# Production Scan
+# ==================================================
 
 async def production_scan():
 
@@ -252,23 +161,23 @@ async def production_scan():
 
         for city in config["preferred_locations"]:
 
-            listings = await scan_city(browser, city)
+            city_listings = await scan_city(browser, city)
 
-            all_listings.extend(listings)
+            all_listings.extend(city_listings)
 
         await browser.close()
 
     return all_listings
 
-# --------------------------------------------------
-# Run scan
-# --------------------------------------------------
+# ==================================================
+# Run Scanner
+# ==================================================
 
 all_listings = asyncio.run(production_scan())
 
 new_listings = [
-    x for x in all_listings
-    if x["url"] not in visited_urls
+    item for item in all_listings
+    if item["url"] not in visited_urls
 ]
 
 new_listings.sort(
@@ -276,28 +185,43 @@ new_listings.sort(
     reverse=True
 )
 
-# --------------------------------------------------
+# ==================================================
 # Summary
-# --------------------------------------------------
+# ==================================================
+
+print("=" * 60)
+print("SCAN SUMMARY")
+print("=" * 60)
+
+summary = {}
+
+for item in all_listings:
+    summary[item["city"]] = summary.get(item["city"], 0) + 1
+
+for city in config["preferred_locations"]:
+    print(f"{city:<24} {summary.get(city,0)}")
 
 print("-" * 60)
-print(f"New listings : {len(new_listings)}")
-print("-" * 60)
+print(f"Total listings found : {len(all_listings)}")
+print(f"Known URLs           : {len(visited_urls)}")
+print(f"New listings         : {len(new_listings)}")
 
-# --------------------------------------------------
-# Telegram
-# --------------------------------------------------
+# ==================================================
+# Telegram Alerts (Top 10 only)
+# ==================================================
 
 TOP_LIMIT = 10
 
+print("-" * 60)
 print(f"Sending top {min(len(new_listings),TOP_LIMIT)} alerts...")
+print("-" * 60)
 
-for item in new_listings[:TOP_LIMIT]:
-    send_property_alert(item)
+for listing in new_listings[:TOP_LIMIT]:
+    send_property_alert(listing)
 
-# --------------------------------------------------
-# Save tracker
-# --------------------------------------------------
+# ==================================================
+# Save Tracker
+# ==================================================
 
 write_header = not TRACKER_FILE.exists()
 
@@ -306,7 +230,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
 
     if write_header:
-
         writer.writerow([
             "Date",
             "City",
@@ -318,14 +241,12 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "URL"
         ])
 
-    from datetime import datetime
-
-    today = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     for item in new_listings:
 
         writer.writerow([
-            today,
+            now,
             item["city"],
             item["title"],
             item["price"],
@@ -335,13 +256,16 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["url"]
         ])
 
-# --------------------------------------------------
-# Update visited
-# --------------------------------------------------
+# ==================================================
+# Update Visited Database
+# ==================================================
 
 visited_urls.update(item["url"] for item in all_listings)
 
 with open(VISITED_FILE, "w", encoding="utf-8") as f:
     json.dump(sorted(visited_urls), f, indent=2)
 
+print("-" * 60)
 print("Database updated.")
+print(f"Tracker file: {TRACKER_FILE.name}")
+print("-" * 60)
