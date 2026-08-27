@@ -2,8 +2,8 @@ import os
 import requests
 
 # Read from GitHub Secrets first, then fall back to hardcoded values
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID", "YOUR_CHAT_ID")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
+CHAT_ID = os.getenv("CHAT_ID", "8963641889")
 
 
 def send_property_alert(property_data):
