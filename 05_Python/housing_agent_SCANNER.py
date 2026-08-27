@@ -6,7 +6,6 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 from telegram_listener import send_property_alert
-from scoring import score_listing
 from filtering import filter_launch_listings
 
 BASE = "https://www.pararius.com"
@@ -38,12 +37,39 @@ else:
     visited_urls = set()
 
 # ==========================================================
+# Original Stable Scoring (v42)
+# ==========================================================
+
+def score_listing(city):
+
+    score = 60
+
+    city = city.lower()
+
+    if city == "rotterdam":
+        score += 20
+
+    elif city in ["schiedam", "delft"]:
+        score += 15
+
+    elif city in [
+        "capelle aan den ijssel",
+        "vlaardingen",
+        "barendrecht",
+        "ridderkerk"
+    ]:
+        score += 10
+
+    return min(score, 100)
+
+# ==========================================================
 # Scan one city (FAST STABLE VERSION)
 # ==========================================================
 
 async def scan_city(browser, city):
 
     page = await browser.new_page()
+
     page.set_default_timeout(8000)
 
     await page.set_extra_http_headers({
@@ -66,7 +92,6 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(1500)
 
-        # KEEP THE WORKING SELECTOR
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
             """
@@ -86,6 +111,7 @@ async def scan_city(browser, city):
         for link in links:
 
             slug = link.split("/")[-1]
+
             title = slug.replace("-", " ").title()
 
             listings.append({
@@ -94,7 +120,7 @@ async def scan_city(browser, city):
                 "price": "",
                 "rooms": "",
                 "area": "",
-                "score": score_listing(city, title, config),
+                "score": score_listing(city),
                 "url": link
             })
 
@@ -159,7 +185,7 @@ new_listings = [
     if item["url"] not in visited_urls
 ]
 
-# Smart filtering (70+ score, top 5)
+# Only safe new feature: top 5 filtering
 new_listings = filter_launch_listings(new_listings)
 
 # ==========================================================
