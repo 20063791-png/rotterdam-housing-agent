@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright
 
 from telegram_listener import send_property_alert
 from scoring import score_listing
+from filtering import filter_launch_listings
 
 BASE = "https://www.pararius.com"
 
@@ -37,60 +38,12 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Smart scoring (uses config.json)
-# ==========================================================
-
-def score_listing(city, price=None):
-
-    score = 50
-
-    city = city.lower()
-
-    if city == "rotterdam":
-        score += config["scoring"]["rotterdam_bonus"]
-
-    elif city in ["schiedam", "delft"]:
-        score += config["scoring"]["schiedam_bonus"]
-
-    elif city in [
-        "capelle aan den ijssel",
-        "vlaardingen",
-        "barendrecht",
-        "ridderkerk"
-    ]:
-        score += config["scoring"]["nearby_bonus"]
-
-    elif city in ["spijkenisse", "dordrecht"]:
-        score += config["scoring"]["outer_bonus"]
-
-    # Price bonus (used later when price exists)
-    if price:
-
-        if price <= config["budget"]["room"]:
-            score += 20
-
-        elif price <= config["budget"]["studio"]:
-            score += 15
-
-        elif price <= config["budget"]["two_room"]:
-            score += 10
-
-        elif price <= config["budget"]["three_room"]:
-            score += 5
-
-        elif price > config["filters"]["absolute_max_price"]:
-            score -= 20
-
-    return max(0, min(score, 100))
-
-# ==========================================================
 # Scan one city (FAST STABLE VERSION)
 # ==========================================================
 
 async def scan_city(browser, city):
 
     page = await browser.new_page()
-
     page.set_default_timeout(8000)
 
     await page.set_extra_http_headers({
@@ -113,7 +66,7 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(1500)
 
-        # KEEPING THE WORKING SELECTOR
+        # KEEP THE WORKING SELECTOR
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
             """
@@ -139,10 +92,10 @@ async def scan_city(browser, city):
                 "city": city,
                 "title": title,
                 "price": "",
-                 "rooms": "",
-                 "area": "",
-                 "score": score_listing(city, title, config),
-                 "url": link
+                "rooms": "",
+                "area": "",
+                "score": score_listing(city, title, config),
+                "url": link
             })
 
         print(f"✓ {city}: {len(listings)} listings")
@@ -206,10 +159,8 @@ new_listings = [
     if item["url"] not in visited_urls
 ]
 
-new_listings.sort(
-    key=lambda x: x["score"],
-    reverse=True
-)
+# Smart filtering (70+ score, top 5)
+new_listings = filter_launch_listings(new_listings)
 
 # ==========================================================
 # Summary
@@ -236,13 +187,13 @@ print(f"New listings         : {len(new_listings)}")
 # Telegram alerts
 # ==========================================================
 
-TOP_LIMIT = 10
+TOP_LIMIT = len(new_listings)
 
 print("-" * 60)
-print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
+print(f"Sending top {TOP_LIMIT} alerts...")
 print("-" * 60)
 
-for i, listing in enumerate(new_listings[:TOP_LIMIT]):
+for i, listing in enumerate(new_listings):
 
     try:
         send_property_alert(listing, i)
