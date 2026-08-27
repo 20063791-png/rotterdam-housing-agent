@@ -1,106 +1,100 @@
 import os
 import requests
-from requests.utils import quote
 
 BOT_TOKEN = os.getenv(
-    "BOT_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
     "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
 )
 
 CHAT_ID = os.getenv(
-    "CHAT_ID",
+    "TELEGRAM_CHAT_ID",
     "8674673640"
 )
 
 
-def send_property_alert(property_data, property_index=0):
+def build_ai_message(property_data):
 
-    if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram secrets missing.")
-        return
+    title = property_data.get("title","this property")
+    city = property_data.get("city","the Netherlands")
+    price = property_data.get("price","")
 
-    city = property_data.get("city", "Unknown")
-    title = property_data.get("title", "Property")
-    price = property_data.get("price", "See listing")
-    rooms = property_data.get("rooms", "?")
-    area = property_data.get("area", "?")
-    score = property_data.get("score", 0)
-    url = property_data.get("url", "")
+    return f"""Hi,
 
-    if score >= 90:
-        priority = "🔥 HIGH PRIORITY"
-    elif score >= 70:
-        priority = "⭐ STRONG MATCH"
-    else:
-        priority = "📍 NEW LISTING"
+I am interested in {title} in {city}.
 
-    message = f"""
-🏠 <b>Housing Agent v5.1</b>
+I am a researcher currently based in Italy and relocating to the Netherlands for my new position. I have a stable professional background and I am looking for a long-term place to rent.
 
-<b>{priority}</b>
+The location and property fit my relocation plans very well, and I would appreciate the opportunity to arrange a viewing.
 
-📍 <b>{title}</b>
-🏙 {city}
+Thank you for your time and consideration.
 
-💶 <b>{price}</b>
-🛏 {rooms} rooms
-📐 {area} m²
+Kind regards,
 
-🎯 <b>Score: {score}/100</b>
-
-<a href="{url}">🏡 Open Listing</a>
+Grifton Muchovu
+Researcher
 """
 
-    keyboard = {
-        "inline_keyboard": [
+
+def send_property_alert(property_data,index):
+
+    score = property_data.get("score",0)
+
+    if score >= 90:
+        badge="🔥 HIGH PRIORITY"
+    elif score >=70:
+        badge="⭐ STRONG MATCH"
+    else:
+        badge="📍 NEW LISTING"
+
+    message=f"""
+🏠 <b>Housing Agent v6</b>
+
+<b>{badge}</b>
+
+📍 <b>{property_data.get('title','')}</b>
+🏙 {property_data.get('city','')}
+
+💶 <b>{property_data.get('price','')}</b>
+🛏 {property_data.get('rooms','?')} rooms
+📐 {property_data.get('area','?')} m²
+
+🎯 <b>Score: {score}/100</b>
+"""
+
+    keyboard={
+        "inline_keyboard":[
             [
                 {
-                    "text": "✉️ AI Message",
-                    "callback_data": f"message|{property_index}"
+                    "text":"🏡 Open Listing",
+                    "url":property_data["url"]
                 }
             ],
             [
                 {
-                    "text": "✅ Applied",
-                    "callback_data": f"applied|{property_index}"
+                    "text":"✍️ Copy AI Message",
+                    "callback_data":f"message|{index}"
+                }
+            ],
+            [
+                {
+                    "text":"🟢 Applied",
+                    "callback_data":f"applied|{index}"
                 },
                 {
-                    "text": "❌ Reject",
-                    "callback_data": f"reject|{property_index}"
+                    "text":"❌ Reject",
+                    "callback_data":f"reject|{index}"
                 }
             ]
         ]
     }
 
-    response = requests.post(
+    requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML",
-            "reply_markup": keyboard,
-            "disable_web_page_preview": False
+            "chat_id":CHAT_ID,
+            "text":message,
+            "parse_mode":"HTML",
+            "reply_markup":keyboard
         },
         timeout=20
-    )
-
-    if response.ok:
-        print(f"Telegram sent: {title}")
-    else:
-        print(response.text)
-
-
-if __name__ == "__main__":
-
-    send_property_alert(
-        {
-            "city": "Rotterdam",
-            "title": "Test Property",
-            "price": "€1200",
-            "rooms": 2,
-            "area": 55,
-            "score": 92,
-            "url": "https://www.pararius.com"
-        },
-        0
     )
