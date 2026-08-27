@@ -87,7 +87,7 @@ async def production_scan():
         print("SCANNING ALL CITIES")
         print("="*60)
 
-        for city in config["cities"]:
+        for city in config["preferred_locations"]:
 
             _, links = await scan_city(browser, city)
 
@@ -118,7 +118,7 @@ print("\n"+"="*60)
 print("SCAN SUMMARY")
 print("="*60)
 
-for city in config["cities"]:
+for city in config["preferred_locations"]:
     print(f"{city:<24} {len(all_city_links[city]):>3}")
 
 print("-"*60)
