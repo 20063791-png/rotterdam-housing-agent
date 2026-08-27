@@ -42,7 +42,6 @@ else:
 def score_listing(city):
 
     score = 60
-
     city = city.lower()
 
     if city == "rotterdam":
@@ -89,8 +88,7 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(3000)
 
-        # ---- This is the selector that worked before ----
-
+        # Keep the selector that already proved reliable.
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
             """
@@ -109,9 +107,8 @@ async def scan_city(browser, city):
 
         for link in links:
 
-            slug = link.split("/")[-1]
-
-            title = slug.replace("-", " ").title()
+            listing_slug = link.split("/")[-1]
+            title = listing_slug.replace("-", " ").title()
 
             listings.append({
                 "city": city,
@@ -126,7 +123,6 @@ async def scan_city(browser, city):
         print(f"✓ {city}: {len(listings)} listings")
 
         await page.close()
-
         return listings
 
     except Exception as e:
@@ -134,7 +130,6 @@ async def scan_city(browser, city):
         print(f"✗ {city}: {e}")
 
         await page.close()
-
         return []
 
 # ==================================================
@@ -159,10 +154,10 @@ async def production_scan():
         print("SCANNING ALL CITIES")
         print("=" * 60)
 
+        # IMPORTANT: Sequential scanning stays.
         for city in config["preferred_locations"]:
 
             city_listings = await scan_city(browser, city)
-
             all_listings.extend(city_listings)
 
         await browser.close()
@@ -213,11 +208,11 @@ print(f"New listings         : {len(new_listings)}")
 TOP_LIMIT = 10
 
 print("-" * 60)
-print(f"Sending top {min(len(new_listings),TOP_LIMIT)} alerts...")
+print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
 print("-" * 60)
 
-for i, listing in enumerate(new_listings[:TOP_LIMIT]):
-    send_property_alert(listing, i)
+for index, listing in enumerate(new_listings[:TOP_LIMIT]):
+    send_property_alert(listing, index)
 
 # ==================================================
 # Save Tracker
@@ -238,7 +233,8 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Rooms",
             "Area",
             "Score",
-            "URL"
+            "URL",
+            "Status"
         ])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -253,7 +249,8 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["rooms"],
             item["area"],
             item["score"],
-            item["url"]
+            item["url"],
+            "New"
         ])
 
 # ==================================================
