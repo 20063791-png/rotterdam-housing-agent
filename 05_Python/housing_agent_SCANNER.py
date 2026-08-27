@@ -36,20 +36,20 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Score listings
+# Smart scoring (uses config.json)
 # ==========================================================
 
-def score_listing(city):
+def score_listing(city, price=None):
 
-    score = 60
+    score = 50
 
     city = city.lower()
 
     if city == "rotterdam":
-        score += 20
+        score += config["scoring"]["rotterdam_bonus"]
 
     elif city in ["schiedam", "delft"]:
-        score += 15
+        score += config["scoring"]["schiedam_bonus"]
 
     elif city in [
         "capelle aan den ijssel",
@@ -57,12 +57,33 @@ def score_listing(city):
         "barendrecht",
         "ridderkerk"
     ]:
-        score += 10
+        score += config["scoring"]["nearby_bonus"]
 
-    return min(score, 100)
+    elif city in ["spijkenisse", "dordrecht"]:
+        score += config["scoring"]["outer_bonus"]
+
+    # Price bonus (used later when price exists)
+    if price:
+
+        if price <= config["budget"]["room"]:
+            score += 20
+
+        elif price <= config["budget"]["studio"]:
+            score += 15
+
+        elif price <= config["budget"]["two_room"]:
+            score += 10
+
+        elif price <= config["budget"]["three_room"]:
+            score += 5
+
+        elif price > config["filters"]["absolute_max_price"]:
+            score -= 20
+
+    return max(0, min(score, 100))
 
 # ==========================================================
-# Scan one city (FAST VERSION)
+# Scan one city (FAST STABLE VERSION)
 # ==========================================================
 
 async def scan_city(browser, city):
@@ -91,6 +112,7 @@ async def scan_city(browser, city):
 
         await page.wait_for_timeout(1500)
 
+        # KEEPING THE WORKING SELECTOR
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
             """
@@ -110,7 +132,6 @@ async def scan_city(browser, city):
         for link in links:
 
             slug = link.split("/")[-1]
-
             title = slug.replace("-", " ").title()
 
             listings.append({
@@ -138,7 +159,7 @@ async def scan_city(browser, city):
         return []
 
 # ==========================================================
-# Scan all cities
+# Scan all cities (Concurrent)
 # ==========================================================
 
 async def production_scan():
@@ -153,17 +174,21 @@ async def production_scan():
             ]
         )
 
-        all_listings = []
-
         print("=" * 60)
         print("SCANNING ALL CITIES")
         print("=" * 60)
 
-        for city in config["preferred_locations"]:
+        tasks = [
+            scan_city(browser, city)
+            for city in config["preferred_locations"]
+        ]
 
-            city_listings = await scan_city(browser, city)
+        results = await asyncio.gather(*tasks)
 
-            all_listings.extend(city_listings)
+        all_listings = []
+
+        for city_results in results:
+            all_listings.extend(city_results)
 
         await browser.close()
 
@@ -207,13 +232,13 @@ print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
 # ==========================================================
-# Telegram alerts (Top 10)
+# Telegram alerts
 # ==========================================================
 
 TOP_LIMIT = 10
 
 print("-" * 60)
-print(f"Sending top {min(len(new_listings),TOP_LIMIT)} alerts...")
+print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
 print("-" * 60)
 
 for i, listing in enumerate(new_listings[:TOP_LIMIT]):
