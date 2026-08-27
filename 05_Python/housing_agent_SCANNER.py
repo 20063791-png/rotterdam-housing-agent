@@ -21,6 +21,13 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 DATABASE_DIR.mkdir(exist_ok=True)
 
 # ==========================================================
+# DEVELOPMENT TEST MODE
+# Set to False after Telegram is confirmed working.
+# ==========================================================
+
+TEST_MODE = True
+
+# ==========================================================
 # Load configuration
 # ==========================================================
 
@@ -68,10 +75,8 @@ def score_listing(city, rooms=0, area=0):
 
     if rooms >= 3:
         score += 15
-
     elif rooms == 2:
         score += 10
-
     elif rooms == 1:
         score += 5
 
@@ -79,13 +84,10 @@ def score_listing(city, rooms=0, area=0):
 
     if area >= 70:
         score += 12
-
     elif area >= 50:
         score += 8
-
     elif area >= 30:
         score += 5
-
     elif area >= config["filters"]["minimum_area"]:
         score += 2
 
@@ -132,6 +134,7 @@ async def scan_city(browser, city):
             card = cards.nth(i)
 
             try:
+
                 href = await card.get_attribute("href")
 
                 if not href:
@@ -149,7 +152,7 @@ async def scan_city(browser, city):
                 slug = link.split("/")[-1]
                 title = slug.replace("-", " ").title()
 
-                # -------- Rooms --------
+                # Rooms
 
                 rooms = 0
 
@@ -158,7 +161,7 @@ async def scan_city(browser, city):
                 if m:
                     rooms = int(m.group(1))
 
-                # -------- Area --------
+                # Area
 
                 area = 0
 
@@ -205,9 +208,7 @@ async def production_scan():
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-
             headless=True,
-
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage"
@@ -240,13 +241,15 @@ async def production_scan():
 
 all_listings = asyncio.run(production_scan())
 
-new_listings = [
-
-    item
-    for item in all_listings
-    if item["url"] not in visited_urls
-
-]
+if TEST_MODE:
+    print("TEST MODE ENABLED - Sending sample listings to Telegram.")
+    new_listings = all_listings[:10]
+else:
+    new_listings = [
+        item
+        for item in all_listings
+        if item["url"] not in visited_urls
+    ]
 
 new_listings = filter_launch_listings(
     new_listings,
@@ -272,7 +275,7 @@ for city in config["preferred_locations"]:
 print("-" * 60)
 print(f"Total listings found : {len(all_listings)}")
 print(f"Known URLs           : {len(visited_urls)}")
-print(f"New listings         : {len(new_listings)}")
+print(f"Listings to send     : {len(new_listings)}")
 
 # ==========================================================
 # Telegram alerts
@@ -288,7 +291,6 @@ for i, listing in enumerate(new_listings[:TOP_LIMIT]):
 
     try:
         send_property_alert(listing, i)
-
     except Exception as e:
         print(f"Telegram failed: {listing['title']} ({e})")
 
@@ -303,9 +305,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
 
     if write_header:
-
         writer.writerow([
-
             "Date",
             "City",
             "Title",
@@ -314,15 +314,12 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Area",
             "Score",
             "URL"
-
         ])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     for item in new_listings:
-
         writer.writerow([
-
             now,
             item["city"],
             item["title"],
@@ -331,7 +328,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["area"],
             item["score"],
             item["url"]
-
         ])
 
 # ==========================================================
