@@ -23,12 +23,8 @@ jobs:
 
       - name: Install Playwright Browser
         run: |
-          playwright install chromium
+          playwright install --with-deps chromium
 
       - name: Run Housing Agent
         run: |
           python 05_Python/housing_agent.py
-
-      - name: Process Telegram Buttons
-        run: |
-          python 05_Python/telegram_callback.py
