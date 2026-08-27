@@ -6,7 +6,6 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 from telegram_listener import send_property_alert
-from scoring import score_listing
 from filtering import filter_launch_listings
 
 BASE = "https://www.pararius.com"
