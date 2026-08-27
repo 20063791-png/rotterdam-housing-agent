@@ -37,7 +37,7 @@
 
   "requirements": {
     "registration_required": true,
-    "furnished_only": true,
+    ""furnished_only": false,
     "available_from": "2026-09-15",
     "minimum_lease_months": 12,
     "max_commute_minutes": 35
