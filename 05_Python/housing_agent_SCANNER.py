@@ -25,43 +25,60 @@ else:
 
 
 async def scan_city(page, city):
-    url = f"{BASE}/apartments/{city.lower().replace(' ', '-')}"
+    slug = city.lower().replace(" ", "-")
+    url = f"{BASE}/apartments/{slug}"
 
     print(f"Scanning {city}...")
 
-    await page.goto(url, wait_until="networkidle", timeout=60000)
+    try:
+        await page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=30000
+        )
 
-    # Wait until apartment cards appear
-    await page.wait_for_selector("a[href*='/apartment-for-rent/']", timeout=30000)
+        # Give the page a moment to render listings
+        await page.wait_for_timeout(3000)
 
-    links = await page.eval_on_selector_all(
-        "a[href*='/apartment-for-rent/']",
-        """
-        elements => [...new Set(elements.map(e =>
-            e.href.startsWith('http')
-                ? e.href
-                : 'https://www.pararius.com' + e.getAttribute('href')
-        ))]
-        """
-    )
+        try:
+            await page.wait_for_selector(
+                "a[href*='/apartment-for-rent/']",
+                timeout=15000
+            )
+        except Exception:
+            print(f"✗ {city}: No apartment cards found.")
+            return []
 
-    print(f"✓ {city}: {len(links)} listings")
+        links = await page.eval_on_selector_all(
+            "a[href*='/apartment-for-rent/']",
+            """
+            elements => [...new Set(elements.map(e => e.href))]
+            """
+        )
 
-    return links
+        print(f"✓ {city}: {len(links)} listings")
+        return links
+
+    except Exception as e:
+        print(f"✗ {city}: {e}")
+        return []
 
 
 async def production_scan():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         )
 
         page = await browser.new_page()
 
-        page.set_default_timeout(60000)
+        page.set_default_timeout(30000)
 
-        page.set_extra_http_headers({
+        await page.set_extra_http_headers({
             "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36"
         })
@@ -73,18 +90,15 @@ async def production_scan():
         print("=" * 60)
 
         for city in config["preferred_locations"]:
-            try:
-                all_links[city] = await scan_city(page, city)
-            except Exception as e:
-                print(f"✗ {city}: {e}")
-                all_links[city] = []
+            all_links[city] = await scan_city(page, city)
 
         await browser.close()
 
     return all_links
 
 
-# Run scanner
+# ---------------- RUN SCANNER ----------------
+
 all_city_links = asyncio.run(production_scan())
 
 rental_links = sorted(set(
@@ -93,7 +107,11 @@ rental_links = sorted(set(
     for link in city_links
 ))
 
-new_urls = [url for url in rental_links if url not in visited_urls]
+new_urls = [
+    url
+    for url in rental_links
+    if url not in visited_urls
+]
 
 print("=" * 60)
 print("SCAN SUMMARY")
