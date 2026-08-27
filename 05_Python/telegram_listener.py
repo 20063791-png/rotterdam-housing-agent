@@ -1,110 +1,58 @@
-from pathlib import Path
-import json
+import os
 import requests
-import pandas as pd
-from datetime import datetime
 
-ROOT = Path(__file__).resolve().parent.parent
+BOT_TOKEN = os.getenv("AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
+CHAT_ID = os.getenv("8963641889")
 
-CONFIG = ROOT/"05_Python/Config/config.json"
-TRACKER = ROOT/"05_Python/Database/housing_tracker.csv"
-LOG = ROOT/"05_Python/Database/applications_log.csv"
 
-with open(CONFIG,"r",encoding="utf-8") as f:
-    config=json.load(f)
+def send_property_alert(property_data):
+    """
+    Sends a beautiful Telegram notification using HTML formatting.
+    """
 
-TOKEN=config["telegram"]["bot_token"]
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Telegram secrets missing.")
+        return
 
-tracker=pd.read_csv(TRACKER)
-log=pd.read_csv(LOG)
+    city = property_data.get("city", "Unknown")
+    title = property_data.get("title", "New Property")
+    price = property_data.get("price", "N/A")
+    rooms = property_data.get("rooms", "?")
+    area = property_data.get("area", "?")
+    score = property_data.get("score", 0)
+    url = property_data.get("url")
 
-updates=requests.get(
-    f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-).json()
+    if score >= 80:
+        priority = "🔥 HIGH PRIORITY"
+    elif score >= 60:
+        priority = "⭐ GOOD MATCH"
+    else:
+        priority = "📌 NEW LISTING"
 
-processed=0
+    message = f"""
+<b>🏠 Housing Agent v4</b>
 
-for item in updates.get("result",[]):
+<b>{priority}</b>
 
-    callback=item.get("callback_query")
+📍 <b>{title}</b>
+🏙 {city}
 
-    if callback is None:
-        continue
+💶 <b>{price}</b>
+🚪 {rooms} rooms
+📐 {area} m²
 
-    action,index=callback["data"].split("|")
-    index=int(index)
+🎯 <b>Score: {score}/100</b>
 
-    prop=tracker.loc[index]
+<a href="{url}">🔗 Open Listing</a>
+"""
 
-    chat_id=callback["message"]["chat"]["id"]
-    message_id=callback["message"]["message_id"]
-
-    if action=="message":
-
-        msg=(
-            f"Hello,\\n\\n"
-            f"I am interested in {prop['title']}.\\n\\n"
-            f"The location in {prop['area'].title()} fits my relocation plans very well.\\n\\n"
-            f"I would appreciate the opportunity to arrange a viewing.\\n\\n"
-            f"Kind regards,\\n"
-            f"Grifton Muchovu"
-        )
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={"chat_id":chat_id,"text":msg}
-        )
-
-    elif action=="applied":
-
-        tracker.loc[index,"property_state"]="applied"
-
-        if not (
-            (log["url"]==prop["url"]) &
-            (log["decision"]=="applied")
-        ).any():
-
-            log.loc[len(log)] = [
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                prop["url"],
-                prop["title"],
-                prop["rent"],
-                "applied",
-                "completed"
-            ]
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/editMessageText",
-            json={
-                "chat_id":chat_id,
-                "message_id":message_id,
-                "text":"🟢 Applied Successfully"
-            }
-        )
-
-    elif action=="reject":
-
-        tracker.loc[index,"property_state"]="rejected"
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/editMessageText",
-            json={
-                "chat_id":chat_id,
-                "message_id":message_id,
-                "text":"❌ Property Rejected"
-            }
-        )
-
-    processed+=1
-
-tracker.to_csv(TRACKER,index=False)
-log.to_csv(LOG,index=False)
-
-print(f"Processed {processed} callbacks.")
-
-if updates["result"]:
-    last=max(u["update_id"] for u in updates["result"])
-    requests.get(
-        f"https://api.telegram.org/bot{TOKEN}/getUpdates",
-        params={"offset":last+1}
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
+        },
+        timeout=20,
     )
