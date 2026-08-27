@@ -13,18 +13,26 @@ scanner = ROOT / "housing_agent_SCANNER.py"
 if not scanner.exists():
     raise FileNotFoundError(f"Scanner not found: {scanner}")
 
-# Run the scanner and show its real output
+print(f"Running: {scanner}")
+print("-" * 60)
+
 result = subprocess.run(
     [sys.executable, str(scanner)],
+    cwd=str(ROOT),
     capture_output=True,
     text=True
 )
 
-print("\n===== SCANNER STDOUT =====")
+print("STDOUT")
+print("-" * 60)
 print(result.stdout)
 
-print("===== SCANNER STDERR =====")
-print(result.stderr)
+if result.stderr:
+    print("STDERR")
+    print("-" * 60)
+    print(result.stderr)
 
-# Make Railway fail only after printing the real error
+print("-" * 60)
+print(f"Exit code: {result.returncode}")
+
 result.check_returncode()
