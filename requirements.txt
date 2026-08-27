@@ -1,6 +1,4 @@
-pandas
-requests
-nest_asyncio
-beautifulsoup4
 playwright
-lxml
+beautifulsoup4
+requests
+pararius
