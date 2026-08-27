@@ -1,17 +1,14 @@
-import os
 import requests
 
-# Read from GitHub Secrets
-BOT_TOKEN = os.getenv("8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
-CHAT_ID = os.getenv("8674673640")
+# ==================================================
+# HARDCODED TELEGRAM SETTINGS (FOR TESTING)
+# ==================================================
+BOT_TOKEN = "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
+CHAT_ID = "8674673640"
 
 
 def send_property_alert(property_data):
     """Send a clean Telegram notification."""
-
-    if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram secrets missing.")
-        return
 
     city = property_data.get("city", "Unknown")
     title = property_data.get("title", "New Property")
@@ -62,9 +59,11 @@ def send_property_alert(property_data):
         print(f"Telegram error: {response.text}")
 
 
-# Telegram connection test
+# ==================================================
+# CONNECTION TEST
+# ==================================================
 if __name__ == "__main__":
-    test = requests.post(
+    response = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
@@ -73,4 +72,4 @@ if __name__ == "__main__":
         timeout=20,
     )
 
-    print(test.text)
+    print(response.text)
