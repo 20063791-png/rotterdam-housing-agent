@@ -62,118 +62,7 @@ def score_listing(city):
     return min(score, 100)
 
 # ==================================================
-# Extract property details
-# ==================================================
-
-async def extract_property_details(browser, link, city):
-
-    page = await browser.new_page()
-
-    await page.set_extra_http_headers({
-        "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36"
-    })
-
-    try:
-
-        await page.goto(
-            link,
-            wait_until="domcontentloaded",
-            timeout=30000
-        )
-
-        await page.wait_for_timeout(1200)
-
-        slug = link.split("/")[-1]
-
-        title = slug.replace("-", " ").title()
-
-        try:
-            h1 = await page.locator("h1").first.inner_text()
-            if h1.strip():
-                title = h1.strip()
-        except:
-            pass
-
-        price = ""
-
-        price_selectors = [
-            "[class*=price]",
-            "[class*=rent]",
-            "text=/€/"
-        ]
-
-        for selector in price_selectors:
-            try:
-                value = await page.locator(selector).first.inner_text()
-                if value:
-                    price = value.strip()
-                    break
-            except:
-                pass
-
-        rooms = ""
-
-        room_selectors = [
-            "text=/room/i",
-            "[class*=room]"
-        ]
-
-        for selector in room_selectors:
-            try:
-                value = await page.locator(selector).first.inner_text()
-                if value:
-                    rooms = value.strip()
-                    break
-            except:
-                pass
-
-        area = ""
-
-        area_selectors = [
-            "text=/m²/i",
-            "text=/sqm/i"
-        ]
-
-        for selector in area_selectors:
-            try:
-                value = await page.locator(selector).first.inner_text()
-                if value:
-                    area = value.strip()
-                    break
-            except:
-                pass
-
-        await page.close()
-
-        return {
-            "city": city,
-            "title": title,
-            "price": price,
-            "rooms": rooms,
-            "area": area,
-            "score": score_listing(city),
-            "url": link
-        }
-
-    except:
-
-        await page.close()
-
-        slug = link.split("/")[-1]
-
-        return {
-            "city": city,
-            "title": slug.replace("-", " ").title(),
-            "price": "",
-            "rooms": "",
-            "area": "",
-            "score": score_listing(city),
-            "url": link
-        }
-
-# ==================================================
-# Scan one city
+# Fast city scanner (stable)
 # ==================================================
 
 async def scan_city(browser, city):
@@ -198,7 +87,7 @@ async def scan_city(browser, city):
             timeout=60000
         )
 
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2500)
 
         links = await page.eval_on_selector_all(
             "a[href*='-for-rent/']",
@@ -214,22 +103,27 @@ async def scan_city(browser, city):
             """
         )
 
-        await page.close()
-
         listings = []
 
-        # Limit to first 20 per city to keep GitHub Actions fast
-        for link in links[:20]:
+        for link in links:
 
-            details = await extract_property_details(
-                browser,
-                link,
-                city
-            )
+            slug = link.split("/")[-1]
 
-            listings.append(details)
+            title = slug.replace("-", " ").title()
+
+            listings.append({
+                "city": city,
+                "title": title,
+                "price": "",
+                "rooms": "",
+                "area": "",
+                "score": score_listing(city),
+                "url": link
+            })
 
         print(f"✓ {city}: {len(listings)} listings")
+
+        await page.close()
 
         return listings
 
@@ -242,7 +136,7 @@ async def scan_city(browser, city):
         return []
 
 # ==================================================
-# Production Scan
+# Production scan
 # ==================================================
 
 async def production_scan():
@@ -274,7 +168,7 @@ async def production_scan():
     return all_listings
 
 # ==================================================
-# Run Scanner
+# Run scanner
 # ==================================================
 
 all_listings = asyncio.run(production_scan())
@@ -311,7 +205,7 @@ print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_listings)}")
 
 # ==================================================
-# Telegram Alerts
+# Telegram alerts (Top 10 only)
 # ==================================================
 
 TOP_LIMIT = 10
@@ -324,7 +218,7 @@ for i, listing in enumerate(new_listings[:TOP_LIMIT]):
     send_property_alert(listing, i)
 
 # ==================================================
-# Save Tracker
+# Save tracker
 # ==================================================
 
 write_header = not TRACKER_FILE.exists()
@@ -361,7 +255,7 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
         ])
 
 # ==================================================
-# Update Visited Database
+# Update visited database
 # ==================================================
 
 visited_urls.update(item["url"] for item in all_listings)
