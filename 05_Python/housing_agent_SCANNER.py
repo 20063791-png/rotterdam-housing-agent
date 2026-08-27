@@ -3,6 +3,8 @@
 # One fresh browser page per city
 # ==========================================================
 
+import json
+from pathlib import Path
 import nest_asyncio
 nest_asyncio.apply()
 
@@ -11,6 +13,12 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 BASE = "https://www.pararius.com"
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = ROOT / "Config" / "config.json"
+
+with open(CONFIG, "r", encoding="utf-8") as f:
+    config = json.load(f)
 
 async def scan_city(browser, city):
 
