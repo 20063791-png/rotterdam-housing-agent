@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import requests
 import asyncio
 from playwright.async_api import async_playwright
@@ -49,39 +51,96 @@ async def fetch_listing_details(url):
                 timeout=8000
             )
 
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(800)
 
-            text = await page.text_content("body")
+            # ==================================================
+            # First try Pararius JSON-LD
+            # ==================================================
 
-            # ---------- Price ----------
+            scripts = await page.locator(
+                "script[type='application/ld+json']"
+            ).all_text_contents()
 
-            import re
+            for script in scripts:
 
-            m = re.search(r"€\s?[\d.,]+", text)
+                try:
 
-            if m:
-                details["price"] = m.group(0)
+                    data = json.loads(script)
 
-            # ---------- Rooms ----------
+                    text = json.dumps(data)
 
-            m = re.search(r"(\d+)\s+rooms?", text, re.I)
+                    # Price
 
-            if m:
-                details["rooms"] = m.group(1)
+                    m = re.search(r'"price"\s*:\s*"?(\\d+)"?', text)
 
-            # ---------- Area ----------
+                    if m and not details["price"]:
+                        details["price"] = f"€{m.group(1)}"
 
-            m = re.search(r"(\d+)\s?m²", text)
+                    # Area
 
-            if m:
-                details["area"] = m.group(1)
+                    m = re.search(
+                        r'"floorSize".*?"value"\s*:\s*(\\d+)',
+                        text
+                    )
 
-            # ---------- First image ----------
+                    if m and not details["area"]:
+                        details["area"] = m.group(1)
 
-            img = await page.locator("img").first.get_attribute("src")
+                    # Image
 
-            if img and img.startswith("http"):
-                details["image"] = img
+                    if isinstance(data, dict) and "image" in data:
+
+                        if isinstance(data["image"], list):
+                            details["image"] = data["image"][0]
+
+                        elif isinstance(data["image"], str):
+                            details["image"] = data["image"]
+
+                except Exception:
+                    pass
+
+            # ==================================================
+            # Fallback to visible page text
+            # ==================================================
+
+            body = await page.text_content("body")
+
+            if not details["price"]:
+
+                m = re.search(r"€\s?[\d.,]+", body)
+
+                if m:
+                    details["price"] = m.group(0)
+
+            if not details["rooms"]:
+
+                m = re.search(r"(\\d+)\\s+rooms?", body, re.I)
+
+                if m:
+                    details["rooms"] = m.group(1)
+
+            if not details["area"]:
+
+                m = re.search(r"(\\d+)\\s?m²", body)
+
+                if m:
+                    details["area"] = m.group(1)
+
+            # ==================================================
+            # Fallback image
+            # ==================================================
+
+            if not details["image"]:
+
+                try:
+
+                    img = await page.locator("img").first.get_attribute("src")
+
+                    if img and img.startswith("http"):
+                        details["image"] = img
+
+                except Exception:
+                    pass
 
             await browser.close()
 
@@ -98,7 +157,7 @@ def build_ai_message(property_data):
 
     return f"""Hello,
 
-I am very interested in the property at **{property_data['title']} ({property_data['city']})**.
+I am very interested in the property at {property_data['title']} ({property_data['city']}).
 
 I am a Master's student at Erasmus University Rotterdam with stable financial support. I am responsible, non-smoking, and looking for a long-term home.
 
@@ -133,7 +192,7 @@ def send_property_alert(property_data, index=0):
     else:
         priority = "📍 NEW LISTING"
 
-    message = f"""🏠 <b>Housing Agent v8</b>
+    message = f"""🏠 <b>Housing Agent v9</b>
 
 <b>{priority}</b>
 
@@ -183,20 +242,21 @@ def send_property_alert(property_data, index=0):
         ]
     }
 
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML",
-        "reply_markup": keyboard
-    }
+    # ==================================================
+    # Send with image if available
+    # ==================================================
 
     if details["image"]:
-        payload["photo"] = details["image"]
-        payload["caption"] = message
 
         response = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-            json=payload,
+            json={
+                "chat_id": CHAT_ID,
+                "photo": details["image"],
+                "caption": message,
+                "parse_mode": "HTML",
+                "reply_markup": keyboard
+            },
             timeout=20
         )
 
@@ -204,7 +264,13 @@ def send_property_alert(property_data, index=0):
 
         response = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json=payload,
+            json={
+                "chat_id": CHAT_ID,
+                "text": message,
+                "parse_mode": "HTML",
+                "reply_markup": keyboard,
+                "disable_web_page_preview": False
+            },
             timeout=20
         )
 
