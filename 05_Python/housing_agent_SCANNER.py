@@ -1,92 +1,70 @@
-# ==========================================================
-# CELL 5 - PRODUCTION MULTI-CITY SCANNER (FINAL)
-# One fresh browser page per city
-# ==========================================================
-
 import json
-from pathlib import Path
-import nest_asyncio
-nest_asyncio.apply()
-
 import asyncio
-from bs4 import BeautifulSoup
+from pathlib import Path
 from playwright.async_api import async_playwright
 
 BASE = "https://www.pararius.com"
 
 ROOT = Path(__file__).resolve().parent
-CONFIG = ROOT / "Config" / "config.json"
-DB_FILE = ROOT / "Database" / "known_urls.json"
+CONFIG_FILE = ROOT / "Config" / "config.json"
+DATABASE_DIR = ROOT / "Database"
+VISITED_FILE = DATABASE_DIR / "visited_urls.json"
+
+DATABASE_DIR.mkdir(exist_ok=True)
 
 # Load configuration
-with open(CONFIG, "r", encoding="utf-8") as f:
+with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     config = json.load(f)
 
-# Load previously seen URLs
-if DB_FILE.exists():
-    with open(DB_FILE, "r", encoding="utf-8") as f:
+# Load visited URLs
+if VISITED_FILE.exists():
+    with open(VISITED_FILE, "r", encoding="utf-8") as f:
         visited_urls = set(json.load(f))
 else:
     visited_urls = set()
 
 
-async def scan_city(browser, city):
+async def scan_city(page, city):
+    url = f"{BASE}/apartments/{city.lower().replace(' ', '-')}"
 
-    page = await browser.new_page()
+    print(f"Scanning {city}...")
 
-    await page.set_extra_http_headers({
-        "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36"
-    })
+    await page.goto(url, wait_until="networkidle", timeout=60000)
 
-    try:
+    # Wait until apartment cards appear
+    await page.wait_for_selector("a[href*='/apartment-for-rent/']", timeout=30000)
 
-        await page.goto(
-            f"{BASE}/apartments/{city}",
-            wait_until="domcontentloaded",
-            timeout=60000
-        )
+    links = await page.eval_on_selector_all(
+        "a[href*='/apartment-for-rent/']",
+        """
+        elements => [...new Set(elements.map(e =>
+            e.href.startsWith('http')
+                ? e.href
+                : 'https://www.pararius.com' + e.getAttribute('href')
+        ))]
+        """
+    )
 
-        await page.wait_for_timeout(4000)
+    print(f"✓ {city}: {len(links)} listings")
 
-        html = await page.content()
-        soup = BeautifulSoup(html, "html.parser")
-
-        links = []
-
-        for a in soup.find_all("a", href=True):
-
-            href = a["href"]
-
-            if href.startswith("/apartment-for-rent/"):
-                links.append(BASE + href)
-
-            elif href.startswith("https://www.pararius.com/apartment-for-rent/"):
-                links.append(href)
-
-        links = sorted(set(links))
-
-        print(f"✓ {city:<24} {len(links):>3} listings")
-
-        await page.close()
-        return city, links
-
-    except Exception as e:
-
-        print(f"✗ {city}: {e}")
-
-        await page.close()
-        return city, []
+    return links
 
 
 async def production_scan():
-
     async with async_playwright() as p:
-
         browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
+
+        page = await browser.new_page()
+
+        page.set_default_timeout(60000)
+
+        page.set_extra_http_headers({
+            "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36"
+        })
 
         all_links = {}
 
@@ -95,17 +73,18 @@ async def production_scan():
         print("=" * 60)
 
         for city in config["preferred_locations"]:
-
-            _, links = await scan_city(browser, city)
-            all_links[city] = links
+            try:
+                all_links[city] = await scan_city(page, city)
+            except Exception as e:
+                print(f"✗ {city}: {e}")
+                all_links[city] = []
 
         await browser.close()
 
     return all_links
 
 
-# ---------------- RUN ----------------
-
+# Run scanner
 all_city_links = asyncio.run(production_scan())
 
 rental_links = sorted(set(
@@ -114,27 +93,22 @@ rental_links = sorted(set(
     for link in city_links
 ))
 
-new_urls = [
-    url
-    for url in rental_links
-    if url not in visited_urls
-]
+new_urls = [url for url in rental_links if url not in visited_urls]
 
-# Update known URLs database
-visited_urls.update(new_urls)
-
-with open(DB_FILE, "w", encoding="utf-8") as f:
-    json.dump(sorted(visited_urls), f, indent=2)
-
-print("\n" + "=" * 60)
+print("=" * 60)
 print("SCAN SUMMARY")
 print("=" * 60)
 
 for city in config["preferred_locations"]:
-    print(f"{city:<24} {len(all_city_links[city]):>3}")
+    print(f"{city:<24} {len(all_city_links[city])}")
 
 print("-" * 60)
-
 print(f"Total listings found : {len(rental_links)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"New listings         : {len(new_urls)}")
+
+# Save updated database
+visited_urls.update(rental_links)
+
+with open(VISITED_FILE, "w", encoding="utf-8") as f:
+    json.dump(sorted(visited_urls), f, indent=2)
