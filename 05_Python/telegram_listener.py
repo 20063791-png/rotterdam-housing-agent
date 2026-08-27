@@ -42,7 +42,7 @@ async def fetch_listing_details(url):
             )
 
             page = await browser.new_page()
-            page.set_default_timeout(5000)
+            page.set_default_timeout(6000)
 
             await page.goto(
                 url,
@@ -55,25 +55,33 @@ async def fetch_listing_details(url):
             text = await page.text_content("body")
             lower = text.lower()
 
-            # ---------------- Price ----------------
+            # --------------------------------------------------
+            # Price
+            # --------------------------------------------------
 
             m = re.search(r"€\s?[\d.,]+", text)
             if m:
                 details["price"] = m.group(0)
 
-            # ---------------- Rooms ----------------
+            # --------------------------------------------------
+            # Rooms
+            # --------------------------------------------------
 
             m = re.search(r"(\d+)\s+rooms?", text, re.I)
             if m:
                 details["rooms"] = m.group(1)
 
-            # ---------------- Area ----------------
+            # --------------------------------------------------
+            # Area
+            # --------------------------------------------------
 
             m = re.search(r"(\d+)\s?m²", text)
             if m:
                 details["area"] = m.group(1)
 
-            # ---------------- Quick Highlights ----------------
+            # --------------------------------------------------
+            # Quick Highlights
+            # --------------------------------------------------
 
             keywords = {
                 "balcony": "Balcony",
@@ -84,7 +92,8 @@ async def fetch_listing_details(url):
                 "elevator": "Elevator",
                 "parking": "Parking",
                 "available immediately": "Available Now",
-                "available now": "Available Now"
+                "available now": "Available Now",
+                "pets allowed": "Pets Allowed"
             }
 
             for key, label in keywords.items():
@@ -93,7 +102,9 @@ async def fetch_listing_details(url):
 
             details["summary"] = details["summary"][:3]
 
-            # ---------------- First usable image ----------------
+            # --------------------------------------------------
+            # Image
+            # --------------------------------------------------
 
             imgs = await page.locator("img").evaluate_all("""
             imgs => imgs
@@ -116,24 +127,36 @@ async def fetch_listing_details(url):
 
     return details
 
-
 # ==========================================================
-# AI Message Builder
+# AI Message Builder (Launch Version)
 # ==========================================================
 
 def build_ai_message(property_data):
 
     return f"""Hello,
 
-I am very interested in the property at {property_data['title']} in {property_data['city']}.
+My name is Grifton Muchovu.
 
-I am a Master's student at Erasmus University Rotterdam with stable financial support. I am responsible, non-smoking and looking for a long-term home.
+I am relocating to Rotterdam to work as a researcher at Erasmus MC on a long-term employment contract, and I am very interested in the property at {property_data['title']} in {property_data['city']}.
 
-I would appreciate the opportunity to arrange a viewing.
+A little about me:
+
+• Researcher at Erasmus MC
+• Stable employment contract and reliable monthly income
+• Non-smoker
+• Quiet, clean and respectful tenant
+• Looking for a long-term home
+• Municipal registration (inschrijving) required
+• References and proof of income available immediately
+
+I value a peaceful and well-maintained home and always take good care of the place where I live.
+
+I would be happy to arrange a viewing at your convenience.
 
 Kind regards,
-Grifton Muchovu"""
 
+Grifton Muchovu
+Erasmus MC Researcher"""
 
 # ==========================================================
 # Telegram Sender
@@ -159,7 +182,7 @@ def send_property_alert(property_data, index=0):
     else:
         priority = "📍 NEW LISTING"
 
-    message = f"""🏠 <b>Housing Agent v11</b>
+    message = f"""🏠 <b>Housing Agent v12</b>
 
 <b>{priority}</b>
 
@@ -181,8 +204,7 @@ def send_property_alert(property_data, index=0):
     if details["summary"]:
         message += "\n\n✨ " + " • ".join(details["summary"])
 
-    # IMPORTANT:
-    # Keep the Pararius URL in the message so Telegram creates its own preview.
+    # Keep Pararius preview
     message += f"\n\n🔗 {property_data['url']}"
 
     keyboard = {
@@ -217,7 +239,7 @@ def send_property_alert(property_data, index=0):
     }
 
     # ======================================================
-    # Try Photo First
+    # Try sending photo first
     # ======================================================
 
     if details["image"]:
@@ -240,11 +262,11 @@ def send_property_alert(property_data, index=0):
 
         print(
             f"Photo failed for {property_data['title']}. "
-            "Falling back to text message."
+            "Using text fallback."
         )
 
     # ======================================================
-    # Guaranteed Text Fallback
+    # Guaranteed fallback
     # ======================================================
 
     text_response = requests.post(
@@ -263,7 +285,6 @@ def send_property_alert(property_data, index=0):
         print(f"Telegram text sent: {property_data['title']}")
     else:
         print(text_response.text)
-
 
 # ==========================================================
 # Local Test
