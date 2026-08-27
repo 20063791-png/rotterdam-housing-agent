@@ -42,7 +42,6 @@ async def fetch_listing_details(url):
             )
 
             page = await browser.new_page()
-
             page.set_default_timeout(5000)
 
             await page.goto(
@@ -59,21 +58,18 @@ async def fetch_listing_details(url):
             # ---------------- Price ----------------
 
             m = re.search(r"€\s?[\d.,]+", text)
-
             if m:
                 details["price"] = m.group(0)
 
             # ---------------- Rooms ----------------
 
             m = re.search(r"(\d+)\s+rooms?", text, re.I)
-
             if m:
                 details["rooms"] = m.group(1)
 
             # ---------------- Area ----------------
 
             m = re.search(r"(\d+)\s?m²", text)
-
             if m:
                 details["area"] = m.group(1)
 
@@ -97,7 +93,7 @@ async def fetch_listing_details(url):
 
             details["summary"] = details["summary"][:3]
 
-            # ---------------- Image ----------------
+            # ---------------- First usable image ----------------
 
             imgs = await page.locator("img").evaluate_all("""
             imgs => imgs
@@ -120,6 +116,7 @@ async def fetch_listing_details(url):
 
     return details
 
+
 # ==========================================================
 # AI Message Builder
 # ==========================================================
@@ -136,6 +133,7 @@ I would appreciate the opportunity to arrange a viewing.
 
 Kind regards,
 Grifton Muchovu"""
+
 
 # ==========================================================
 # Telegram Sender
@@ -176,10 +174,16 @@ def send_property_alert(property_data, index=0):
     if area:
         message += f"\n📐 {area} m²"
 
-    message += f"\n\n🎯 <b>Score: {score}/100</b>"
+    message += f"""
+
+🎯 <b>Score: {score}/100</b>"""
 
     if details["summary"]:
         message += "\n\n✨ " + " • ".join(details["summary"])
+
+    # IMPORTANT:
+    # Keep the Pararius URL in the message so Telegram creates its own preview.
+    message += f"\n\n🔗 {property_data['url']}"
 
     keyboard = {
         "inline_keyboard": [
@@ -212,9 +216,13 @@ def send_property_alert(property_data, index=0):
         ]
     }
 
+    # ======================================================
+    # Try Photo First
+    # ======================================================
+
     if details["image"]:
 
-        response = requests.post(
+        photo_response = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
             json={
                 "chat_id": CHAT_ID,
@@ -226,23 +234,36 @@ def send_property_alert(property_data, index=0):
             timeout=20
         )
 
-    else:
+        if photo_response.ok:
+            print(f"Telegram photo sent: {property_data['title']}")
+            return
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": CHAT_ID,
-                "text": message,
-                "parse_mode": "HTML",
-                "reply_markup": keyboard
-            },
-            timeout=20
+        print(
+            f"Photo failed for {property_data['title']}. "
+            "Falling back to text message."
         )
 
-    if response.ok:
-        print(f"Telegram sent: {property_data['title']}")
+    # ======================================================
+    # Guaranteed Text Fallback
+    # ======================================================
+
+    text_response = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML",
+            "reply_markup": keyboard,
+            "disable_web_page_preview": False
+        },
+        timeout=20
+    )
+
+    if text_response.ok:
+        print(f"Telegram text sent: {property_data['title']}")
     else:
-        print(response.text)
+        print(text_response.text)
+
 
 # ==========================================================
 # Local Test
