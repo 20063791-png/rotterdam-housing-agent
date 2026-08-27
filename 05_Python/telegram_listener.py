@@ -8,8 +8,8 @@ from playwright.async_api import async_playwright
 # Telegram Configuration (RESTORED WORKING VERSION)
 # ==========================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
-CHAT_ID = os.getenv("CHAT_ID") or "8674673640"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN"
+CHAT_ID = os.getenv("CHAT_ID") or "YOUR_CHAT_ID"
 
 # ==========================================================
 # Fast Property Detail Extractor
@@ -22,7 +22,9 @@ async def fetch_listing_details(url):
         "rooms": "",
         "area": "",
         "image": "",
-        "summary": []
+        "summary": [],
+        "furnished": False,
+        "upholstered": False
     }
 
     try:
@@ -66,20 +68,36 @@ async def fetch_listing_details(url):
             if m:
                 details["area"] = m.group(1)
 
+            # ---------------- Furnishing ----------------
+
+            details["furnished"] = (
+                "furnished" in lower or
+                "gemeubileerd" in lower
+            )
+
+            details["upholstered"] = (
+                "upholstered" in lower or
+                "gestoffeerd" in lower
+            )
+
             # ---------------- Quick Highlights ----------------
 
             keywords = {
                 "balcony": "Balcony",
                 "garden": "Garden",
                 "terrace": "Terrace",
-                "furnished": "Furnished",
-                "upholstered": "Upholstered",
                 "elevator": "Elevator",
                 "parking": "Parking",
                 "available immediately": "Available Now",
                 "available now": "Available Now",
                 "pets allowed": "Pets Allowed"
             }
+
+            if details["furnished"]:
+                details["summary"].append("Furnished")
+
+            elif details["upholstered"]:
+                details["summary"].append("Upolstered")
 
             for key, label in keywords.items():
                 if key in lower:
@@ -153,15 +171,44 @@ def send_property_alert(property_data, index=0):
 
     details = asyncio.run(fetch_listing_details(property_data["url"]))
 
-    price = details["price"] or "Price on listing"
-    rooms = details["rooms"]
-    area = details["area"]
+    # Prefer scanner values, fallback to page extraction
+
+    price = (
+        f"€{property_data['price']}"
+        if property_data.get("price")
+        else details["price"] or "Price on listing"
+    )
+
+    rooms = (
+        str(property_data["rooms"])
+        if property_data.get("rooms")
+        else details["rooms"]
+    )
+
+    area = (
+        str(property_data["area"])
+        if property_data.get("area")
+        else details["area"]
+    )
+
+    furnished = (
+        property_data.get("furnished", False)
+        or details["furnished"]
+    )
+
+    upholstered = (
+        property_data.get("upholstered", False)
+        or details["upholstered"]
+    )
+
     score = property_data["score"]
 
     if score >= 90:
         priority = "🔥 HIGH PRIORITY"
-    elif score >= 70:
+
+    elif score >= 75:
         priority = "⭐ STRONG MATCH"
+
     else:
         priority = "📍 NEW LISTING"
 
@@ -175,17 +222,29 @@ def send_property_alert(property_data, index=0):
 💶 <b>{price}</b>"""
 
     if rooms:
-        message += f"\n🛏 {rooms} rooms"
+        message += f"\n🛏 {rooms} room"
 
     if area:
         message += f"\n📐 {area} m²"
+
+    if furnished:
+        message += "\n🛋 Furnished"
+
+    elif upholstered:
+        message += "\n🪑 Upholstered"
 
     message += f"""
 
 🎯 <b>Score: {score}/100</b>"""
 
     if details["summary"]:
-        message += "\n\n✨ " + " • ".join(details["summary"])
+        extras = [
+            x for x in details["summary"]
+            if x not in ["Furnished", "Upolstered"]
+        ]
+
+        if extras:
+            message += "\n\n✨ " + " • ".join(extras)
 
     # Keep Pararius preview
     message += f"\n\n🔗 {property_data['url']}"
@@ -280,6 +339,10 @@ if __name__ == "__main__":
             "title": "Test Property",
             "city": "Rotterdam",
             "score": 80,
+            "price": 850,
+            "rooms": 2,
+            "area": 55,
+            "furnished": True,
             "url": "https://www.pararius.com"
         }
     )
