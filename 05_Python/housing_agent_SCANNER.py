@@ -6,7 +6,6 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 from telegram_listener import send_property_alert
-from filtering import filter_launch_listings
 
 BASE = "https://www.pararius.com"
 
@@ -37,7 +36,7 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Original Stable Scoring (v42)
+# Stable scoring (Run #42)
 # ==========================================================
 
 def score_listing(city):
@@ -63,13 +62,12 @@ def score_listing(city):
     return min(score, 100)
 
 # ==========================================================
-# Scan one city (FAST STABLE VERSION)
+# Scan one city
 # ==========================================================
 
 async def scan_city(browser, city):
 
     page = await browser.new_page()
-
     page.set_default_timeout(8000)
 
     await page.set_extra_http_headers({
@@ -111,7 +109,6 @@ async def scan_city(browser, city):
         for link in links:
 
             slug = link.split("/")[-1]
-
             title = slug.replace("-", " ").title()
 
             listings.append({
@@ -139,7 +136,7 @@ async def scan_city(browser, city):
         return []
 
 # ==========================================================
-# Scan all cities (Concurrent)
+# Scan all cities (concurrent)
 # ==========================================================
 
 async def production_scan():
@@ -185,8 +182,10 @@ new_listings = [
     if item["url"] not in visited_urls
 ]
 
-# Only safe new feature: top 5 filtering
-new_listings = filter_launch_listings(new_listings)
+new_listings.sort(
+    key=lambda x: x["score"],
+    reverse=True
+)
 
 # ==========================================================
 # Summary
@@ -213,13 +212,13 @@ print(f"New listings         : {len(new_listings)}")
 # Telegram alerts
 # ==========================================================
 
-TOP_LIMIT = len(new_listings)
+TOP_LIMIT = 10
 
 print("-" * 60)
-print(f"Sending top {TOP_LIMIT} alerts...")
+print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
 print("-" * 60)
 
-for i, listing in enumerate(new_listings):
+for i, listing in enumerate(new_listings[:TOP_LIMIT]):
 
     try:
         send_property_alert(listing, i)
