@@ -5,22 +5,24 @@ on:
 
 jobs:
   scan:
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          playwright install chromium
+        run: pip install -r requirements.txt
 
-      - name: Run Housing Agent
+      - name: Run Housing Scanner
         run: python 05_Python/housing_agent.py
+
+      - name: Process Telegram Buttons
+        run: python 05_Python/telegram_callback.py
