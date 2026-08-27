@@ -1,9 +1,5 @@
 import os
-import json
-import re
 import requests
-import asyncio
-from playwright.async_api import async_playwright
 
 # ==========================================================
 # Telegram Configuration
@@ -18,136 +14,6 @@ CHAT_ID = os.getenv(
     "CHAT_ID",
     "8674673640"
 )
-
-# ==========================================================
-# Fast Property Detail Extractor
-# ==========================================================
-
-async def fetch_listing_details(url):
-
-    details = {
-        "price": "",
-        "rooms": "",
-        "area": "",
-        "image": ""
-    }
-
-    try:
-
-        async with async_playwright() as p:
-
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox"]
-            )
-
-            page = await browser.new_page()
-
-            page.set_default_timeout(5000)
-
-            await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=8000
-            )
-
-            await page.wait_for_timeout(800)
-
-            # ==================================================
-            # First try Pararius JSON-LD
-            # ==================================================
-
-            scripts = await page.locator(
-                "script[type='application/ld+json']"
-            ).all_text_contents()
-
-            for script in scripts:
-
-                try:
-
-                    data = json.loads(script)
-
-                    text = json.dumps(data)
-
-                    # Price
-
-                    m = re.search(r'"price"\s*:\s*"?(\\d+)"?', text)
-
-                    if m and not details["price"]:
-                        details["price"] = f"€{m.group(1)}"
-
-                    # Area
-
-                    m = re.search(
-                        r'"floorSize".*?"value"\s*:\s*(\\d+)',
-                        text
-                    )
-
-                    if m and not details["area"]:
-                        details["area"] = m.group(1)
-
-                    # Image
-
-                    if isinstance(data, dict) and "image" in data:
-
-                        if isinstance(data["image"], list):
-                            details["image"] = data["image"][0]
-
-                        elif isinstance(data["image"], str):
-                            details["image"] = data["image"]
-
-                except Exception:
-                    pass
-
-            # ==================================================
-            # Fallback to visible page text
-            # ==================================================
-
-            body = await page.text_content("body")
-
-            if not details["price"]:
-
-                m = re.search(r"€\s?[\d.,]+", body)
-
-                if m:
-                    details["price"] = m.group(0)
-
-            if not details["rooms"]:
-
-                m = re.search(r"(\\d+)\\s+rooms?", body, re.I)
-
-                if m:
-                    details["rooms"] = m.group(1)
-
-            if not details["area"]:
-
-                m = re.search(r"(\\d+)\\s?m²", body)
-
-                if m:
-                    details["area"] = m.group(1)
-
-            # ==================================================
-            # Fallback image
-            # ==================================================
-
-            if not details["image"]:
-
-                try:
-
-                    img = await page.locator("img").first.get_attribute("src")
-
-                    if img and img.startswith("http"):
-                        details["image"] = img
-
-                except Exception:
-                    pass
-
-            await browser.close()
-
-    except Exception:
-        pass
-
-    return details
 
 # ==========================================================
 # AI Message Builder
@@ -176,13 +42,6 @@ def send_property_alert(property_data, index=0):
         print("Telegram secrets missing.")
         return
 
-    details = asyncio.run(fetch_listing_details(property_data["url"]))
-
-    price = details["price"] or "Price on listing"
-
-    rooms = details["rooms"]
-    area = details["area"]
-
     score = property_data["score"]
 
     if score >= 90:
@@ -192,24 +51,17 @@ def send_property_alert(property_data, index=0):
     else:
         priority = "📍 NEW LISTING"
 
-    message = f"""🏠 <b>Housing Agent v9</b>
+    # Clean summary above the preview
+    message = f"""🏠 <b>Housing Agent v10</b>
 
 <b>{priority}</b>
 
 📍 <b>{property_data['title']}</b>
 🏙 {property_data['city']}
 
-💶 <b>{price}</b>"""
+🎯 <b>Score: {score}/100</b>
 
-    if rooms:
-        message += f"\n🛏 {rooms} rooms"
-
-    if area:
-        message += f"\n📐 {area} m²"
-
-    message += f"""
-
-🎯 <b>Score: {score}/100</b>"""
+🔗 {property_data['url']}"""
 
     keyboard = {
         "inline_keyboard": [
@@ -242,37 +94,17 @@ def send_property_alert(property_data, index=0):
         ]
     }
 
-    # ==================================================
-    # Send with image if available
-    # ==================================================
-
-    if details["image"]:
-
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-            json={
-                "chat_id": CHAT_ID,
-                "photo": details["image"],
-                "caption": message,
-                "parse_mode": "HTML",
-                "reply_markup": keyboard
-            },
-            timeout=20
-        )
-
-    else:
-
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": CHAT_ID,
-                "text": message,
-                "parse_mode": "HTML",
-                "reply_markup": keyboard,
-                "disable_web_page_preview": False
-            },
-            timeout=20
-        )
+    response = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML",
+            "reply_markup": keyboard,
+            "disable_web_page_preview": False
+        },
+        timeout=20
+    )
 
     if response.ok:
         print(f"Telegram sent: {property_data['title']}")
