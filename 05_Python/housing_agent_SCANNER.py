@@ -139,10 +139,10 @@ async def scan_city(browser, city):
                 "city": city,
                 "title": title,
                 "price": "",
-                "rooms": "",
-                "area": "",
-                "score": score_listing(city),
-                "url": link
+                 "rooms": "",
+                 "area": "",
+                 "score": score_listing(city, title, config),
+                 "url": link
             })
 
         print(f"✓ {city}: {len(listings)} listings")
