@@ -21,13 +21,6 @@ TRACKER_FILE = DATABASE_DIR / "housing_tracker.csv"
 DATABASE_DIR.mkdir(exist_ok=True)
 
 # ==========================================================
-# DEVELOPMENT TEST MODE
-# Set False after Telegram testing.
-# ==========================================================
-
-TEST_MODE = True
-
-# ==========================================================
 # Load configuration
 # ==========================================================
 
@@ -45,52 +38,94 @@ else:
     visited_urls = set()
 
 # ==========================================================
-# Smart scoring
+# Smart scoring (100-point system)
 # ==========================================================
 
-def score_listing(city, rooms=0, area=0):
+def score_listing(city, title="", rooms=0, area=0):
 
-    score = 40
-    city_lower = city.lower()
+    score = 0
 
-    if city_lower == "rotterdam":
-        score += config["scoring"]["rotterdam_bonus"]
+    city_points = {
+        "rotterdam": 30,
+        "schiedam": 27,
+        "delft": 26,
+        "capelle aan den ijssel": 25,
+        "vlaardingen": 24,
+        "barendrecht": 23,
+        "ridderkerk": 22,
+        "dordrecht": 18,
+        "spijkenisse": 17
+    }
 
-    elif city_lower in ["schiedam", "delft"]:
-        score += config["scoring"]["schiedam_bonus"]
+    score += city_points.get(city.lower(), 15)
 
-    elif city_lower in [
-        "capelle aan den ijssel",
-        "vlaardingen",
-        "barendrecht",
-        "ridderkerk"
-    ]:
-        score += config["scoring"]["nearby_bonus"]
+    title_lower = title.lower()
 
-    elif city_lower in ["spijkenisse", "dordrecht"]:
-        score += config["scoring"]["outer_bonus"]
+    # ------------------------------------------------------
+    # Furnishing (highest priority)
+    # ------------------------------------------------------
 
-    # Rooms bonus
+    if "furnished" in title_lower:
+        score += 25
 
-    if rooms >= 3:
+    elif "upholstered" in title_lower:
         score += 15
-    elif rooms == 2:
-        score += 10
-    elif rooms == 1:
+
+    else:
         score += 5
 
-    # Area bonus
+    # ------------------------------------------------------
+    # Occupancy fit
+    # ------------------------------------------------------
 
-    if area >= 70:
-        score += 12
-    elif area >= 50:
+    if rooms == 0:
         score += 8
-    elif area >= 30:
+
+    elif rooms == 1:
+        score += 15
+
+    elif rooms == 2:
+        score += 15
+
+    elif rooms == 3:
+        score += 15
+
+    else:
+        score += 12
+
+    # ------------------------------------------------------
+    # Area (small influence)
+    # ------------------------------------------------------
+
+    if area >= 90:
         score += 5
+
+    elif area >= 70:
+        score += 4
+
+    elif area >= 50:
+        score += 3
+
     elif area >= config["filters"]["minimum_area"]:
         score += 2
 
-    return max(0, min(score, 100))
+    # ------------------------------------------------------
+    # Bonus keywords
+    # ------------------------------------------------------
+
+    bonuses = {
+        "balcony": 2,
+        "terrace": 2,
+        "garden": 2,
+        "renovated": 1,
+        "new build": 1
+    }
+
+    for word, bonus in bonuses.items():
+        if word in title_lower:
+            score += bonus
+
+    return min(score, 100)
 
 # ==========================================================
 # Scan one city
@@ -151,18 +186,16 @@ async def scan_city(browser, city):
                 slug = link.split("/")[-1]
                 title = slug.replace("-", " ").title()
 
-                # -------- Rooms --------
-
                 rooms = 0
-                m = re.search(r"(\d+)\s+room", text, re.I)
+
+                m = re.search(r"(\\d+)\\s+room", text, re.I)
 
                 if m:
                     rooms = int(m.group(1))
 
-                # -------- Area --------
-
                 area = 0
-                m = re.search(r"(\d+)\s*m²", text, re.I)
+
+                m = re.search(r"(\\d+)\\s*m²", text, re.I)
 
                 if m:
                     area = int(m.group(1))
@@ -174,7 +207,7 @@ async def scan_city(browser, city):
                     "price": "",
                     "rooms": rooms,
                     "area": area,
-                    "score": score_listing(city, rooms, area),
+                    "score": score_listing(city, title, rooms, area),
                     "url": link
 
                 })
@@ -240,28 +273,23 @@ async def production_scan():
 
 all_listings = asyncio.run(production_scan())
 
-if TEST_MODE:
+new_listings = [
 
-    print("TEST MODE ENABLED - Sending sample listings to Telegram.")
+    item
+    for item in all_listings
+    if item["url"] not in visited_urls
 
-    new_listings = all_listings[:10]
+]
 
-else:
+new_listings = filter_launch_listings(
+    new_listings,
+    config
+)
 
-    new_listings = [
-
-        item
-        for item in all_listings
-        if item["url"] not in visited_urls
-
-    ]
-
-    # Only filter during production
-
-    new_listings = filter_launch_listings(
-        new_listings,
-        config
-    )
+new_listings.sort(
+    key=lambda x: x["score"],
+    reverse=True
+)
 
 # ==========================================================
 # Summary
