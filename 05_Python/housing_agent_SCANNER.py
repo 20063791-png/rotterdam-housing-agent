@@ -4,6 +4,8 @@ import asyncio
 from pathlib import Path
 from playwright.async_api import async_playwright
 
+from telegram_listener import send_property_alert
+
 BASE = "https://www.pararius.com"
 
 ROOT = Path(__file__).resolve().parent
