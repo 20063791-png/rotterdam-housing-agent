@@ -1,17 +1,15 @@
 import os
 import requests
 
-# Read from GitHub Secrets first, then fall back to hardcoded values
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
-CHAT_ID = os.getenv("CHAT_ID", "8674673640")
+# Read from GitHub Secrets
+BOT_TOKEN = os.getenv("8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc")
+CHAT_ID = os.getenv("8674673640")
 
 
 def send_property_alert(property_data):
-    """
-    Send a clean HTML Telegram notification.
-    """
+    """Send a clean Telegram notification."""
 
-    if BOT_TOKEN == "AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc" or CHAT_ID == "8963641889":
+    if not BOT_TOKEN or not CHAT_ID:
         print("Telegram secrets missing.")
         return
 
@@ -25,31 +23,29 @@ def send_property_alert(property_data):
 
     if score >= 90:
         priority = "🔥 HIGH PRIORITY"
-    elif score >= 75:
+    elif score >= 70:
         priority = "⭐ STRONG MATCH"
-    elif score >= 60:
-        priority = "✅ GOOD MATCH"
     else:
-        priority = "🆕 NEW LISTING"
+        priority = "📍 NEW LISTING"
 
     message = f"""
-<b>🏡 Housing Agent v4</b>
+🏠 <b>Housing Agent v4</b>
 
 <b>{priority}</b>
 
 📍 <b>{title}</b>
-🏙️ {city}
+🏙 {city}
 
 💶 <b>{price}</b>
-🛏️ {rooms} rooms
+🛏 {rooms} rooms
 📐 {area} m²
 
 🎯 <b>Score: {score}/100</b>
 
-<a href="{url}">🏠 Open Listing</a>
+<a href="{url}">🏡 Open Listing</a>
 """
 
-    requests.post(
+    response = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
@@ -57,14 +53,24 @@ def send_property_alert(property_data):
             "parse_mode": "HTML",
             "disable_web_page_preview": False,
         },
+        timeout=20,
+    )
 
-        if __name__ == "__main__":
-    requests.post(
+    if response.ok:
+        print(f"Telegram sent: {title}")
+    else:
+        print(f"Telegram error: {response.text}")
+
+
+# Telegram connection test
+if __name__ == "__main__":
+    test = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
             "text": "✅ Housing Agent Telegram test successful."
-        }
-    )
+        },
         timeout=20,
     )
+
+    print(test.text)
