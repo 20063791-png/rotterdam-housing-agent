@@ -184,9 +184,9 @@ new_listings = [
     if item["url"] not in visited_urls
 ]
 
-new_listings.sort(
-    key=lambda x: x["score"],
-    reverse=True
+new_listings = filter_launch_listings(
+    new_listings,
+    config
 )
 
 # ==========================================================
