@@ -1,34 +1,18 @@
-import re
-
-
-def extract_price(title):
-
-    m = re.search(r"€?\s?([\d.]+)", title)
-
-    if m:
-        return int(m.group(1).replace(".", ""))
-
-    return None
-
-
 def filter_launch_listings(listings, config):
+    """
+    Keep only worthwhile listings for launch.
+    """
 
-    filtered = []
+    minimum_score = 70
 
-    max_price = config["filters"]["absolute_max_price"]
+    listings = [
+        x for x in listings
+        if x.get("score", 0) >= minimum_score
+    ]
 
-    for listing in listings:
-
-        price = extract_price(listing["title"])
-
-        if price and price > max_price:
-            continue
-
-        filtered.append(listing)
-
-    filtered.sort(
+    listings.sort(
         key=lambda x: x["score"],
         reverse=True
     )
 
-    return filtered[:5]
+    return listings[:5]
