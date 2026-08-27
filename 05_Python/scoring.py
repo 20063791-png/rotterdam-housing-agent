@@ -1,17 +1,10 @@
 import re
 
-
 def extract_price(title):
-
-    m = re.search(r"(\d[\d.,]*)", title.replace(",", ""))
-
-    if not m:
-        return None
-
-    try:
+    m = re.search(r"€?\s?([\d.]+)", title)
+    if m:
         return int(m.group(1).replace(".", ""))
-    except:
-        return None
+    return None
 
 
 def score_listing(city, title, config):
@@ -19,87 +12,41 @@ def score_listing(city, title, config):
     score = 50
 
     city_lower = city.lower()
-    title_lower = title.lower()
 
-    # ======================================================
-    # City Priority
-    # ======================================================
+    if city_lower == "rotterdam":
+        score += config["scoring"]["rotterdam_bonus"]
 
-    city_bonus = {
-        "rotterdam": 30,
-        "schiedam": 22,
-        "delft": 20,
-        "capelle aan den ijssel": 15,
-        "vlaardingen": 12,
-        "ridderkerk": 8,
-        "barendrecht": 8,
-        "spijkenisse": 5,
-        "dordrecht": 5
-    }
+    elif city_lower in ["schiedam", "delft"]:
+        score += config["scoring"]["schiedam_bonus"]
 
-    score += city_bonus.get(city_lower, 0)
+    elif city_lower in [
+        "capelle aan den ijssel",
+        "vlaardingen",
+        "barendrecht",
+        "ridderkerk"
+    ]:
+        score += config["scoring"]["nearby_bonus"]
 
-    # ======================================================
-    # Property Type
-    # ======================================================
-
-    if "studio" in title_lower:
-        score += 15
-
-    elif "apartment" in title_lower:
-        score += 12
-
-    elif "flat" in title_lower:
-        score += 10
-
-    elif "room" in title_lower:
-        score += 6
-
-    # ======================================================
-    # Furnishing Bonus
-    # ======================================================
-
-    bonuses = [
-        "furnished",
-        "upholstered",
-        "balcony",
-        "garden",
-        "terrace",
-        "parking"
-    ]
-
-    for word in bonuses:
-
-        if word in title_lower:
-            score += 3
-
-    # ======================================================
-    # Price Bonus
-    # ======================================================
+    else:
+        score += config["scoring"]["outer_bonus"]
 
     price = extract_price(title)
 
-    budget = config["budget"]["three_room"]
-
     if price:
 
-        if price <= budget * 0.70:
+        if price <= config["budget"]["room"]:
+            score += 20
+
+        elif price <= config["budget"]["studio"]:
+            score += 15
+
+        elif price <= config["budget"]["two_room"]:
             score += 10
 
-        elif price <= budget:
-            score += 6
+        elif price <= config["budget"]["three_room"]:
+            score += 5
 
-        elif price <= budget * 1.15:
-            score += 2
-
-        else:
-            score -= 10
-
-    # ======================================================
-    # Registration Preference
-    # ======================================================
-
-    if "registration" in title_lower or "inschrijving" in title_lower:
-        score += 5
+        elif price > config["filters"]["absolute_max_price"]:
+            score -= 35
 
     return max(0, min(score, 100))
