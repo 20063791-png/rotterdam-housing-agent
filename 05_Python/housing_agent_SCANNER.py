@@ -111,32 +111,28 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     return min(score, 100)
 
 # ==========================================================
-# Real city detection
+# SAFE city detection (FROM URL)
 # ==========================================================
 
-async def get_listing_city(page, default_city):
+def get_listing_city(link, default_city):
 
-    try:
-        body = (await page.text_content("body") or "").lower()
+    link = link.lower()
 
-        cities = [
-            "rotterdam",
-            "schiedam",
-            "delft",
-            "capelle aan den ijssel",
-            "vlaardingen",
-            "barendrecht",
-            "ridderkerk",
-            "spijkenisse",
-            "dordrecht"
-        ]
+    cities = [
+        "rotterdam",
+        "schiedam",
+        "delft",
+        "capelle-aan-den-ijssel",
+        "vlaardingen",
+        "barendrecht",
+        "ridderkerk",
+        "spijkenisse",
+        "dordrecht"
+    ]
 
-        for city_name in cities:
-            if city_name in body:
-                return city_name.title()
-
-    except Exception:
-        pass
+    for city_name in cities:
+        if f"/{city_name}/" in link:
+            return city_name.replace("-", " ").title()
 
     return default_city
 
@@ -241,7 +237,8 @@ async def scan_city(browser, city):
                         if m:
                             area = int(m.group(1))
 
-                        real_city = await get_listing_city(page, city)
+                        # SAFE city detection from URL
+                        real_city = get_listing_city(link, city)
 
                         listings.append({
 
@@ -325,6 +322,17 @@ async def production_scan():
 # ==========================================================
 
 all_listings = asyncio.run(production_scan())
+
+# ==========================================================
+# GLOBAL duplicate removal (SAFE FIX)
+# ==========================================================
+
+unique = {}
+
+for item in all_listings:
+    unique[item["url"]] = item
+
+all_listings = list(unique.values())
 
 if DEBUG_SEND:
 
@@ -428,7 +436,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     if write_header:
 
         writer.writerow([
-
             "Date",
             "City",
             "Title",
@@ -437,7 +444,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             "Area",
             "Score",
             "URL"
-
         ])
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -445,7 +451,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
     for item in new_listings:
 
         writer.writerow([
-
             now,
             item["city"],
             item["title"],
@@ -454,7 +459,6 @@ with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
             item["area"],
             item["score"],
             item["url"]
-
         ])
 
 # ==========================================================
