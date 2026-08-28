@@ -52,27 +52,23 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     score = 0
     text = text.lower()
 
-    # ------------------------------------------------------
-    # City (20)
-    # ------------------------------------------------------
+    # ---------------- City (20) ----------------
 
     city_points = {
-        "rotterdam":20,
-        "schiedam":18,
-        "delft":17,
-        "capelle aan den ijssel":15,
-        "vlaardingen":14,
-        "barendrecht":13,
-        "ridderkerk":12,
-        "dordrecht":10,
-        "spijkenisse":8
+        "rotterdam": 20,
+        "schiedam": 18,
+        "delft": 17,
+        "capelle aan den ijssel": 15,
+        "vlaardingen": 14,
+        "barendrecht": 13,
+        "ridderkerk": 12,
+        "dordrecht": 10,
+        "spijkenisse": 8
     }
 
-    score += city_points.get(city.lower(),8)
+    score += city_points.get(city.lower(), 8)
 
-    # ------------------------------------------------------
-    # Furnishing (30)
-    # ------------------------------------------------------
+    # ---------------- Furnishing (30) ----------------
 
     if "furnished" in text:
         score += 30
@@ -80,9 +76,7 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     elif "upholstered" in text:
         score += 18
 
-    # ------------------------------------------------------
-    # Budget (30)
-    # ------------------------------------------------------
+    # ---------------- Budget (30) ----------------
 
     if price_value:
 
@@ -101,16 +95,12 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
         elif price_value <= config["filters"]["absolute_max_price"]:
             score += 10
 
-    # ------------------------------------------------------
-    # Registration (8)
-    # ------------------------------------------------------
+    # ---------------- Registration (8) ----------------
 
     if "registration" in text:
         score += 8
 
-    # ------------------------------------------------------
-    # Area (7)
-    # ------------------------------------------------------
+    # ---------------- Area (7) ----------------
 
     if area >= 80:
         score += 7
@@ -124,19 +114,17 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     elif area >= config["filters"]["minimum_area"]:
         score += 2
 
-    # ------------------------------------------------------
-    # Nice-to-have (5)
-    # ------------------------------------------------------
+    # ---------------- Nice-to-have (5) ----------------
 
     bonus = 0
 
-    for word in ["balcony","terrace","garden"]:
+    for word in ["balcony", "terrace", "garden"]:
         if word in text:
             bonus += 2
 
-    score += min(bonus,5)
+    score += min(bonus, 5)
 
-    return min(score,100)
+    return min(score, 100)
 
 # ==========================================================
 # Scan one city
@@ -152,118 +140,128 @@ async def scan_city(browser, city):
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36"
     })
 
-    slug = city.lower().replace(" ","-")
-    url = f"{BASE}/apartments/{slug}"
+    slug = city.lower().replace(" ", "-")
+
+    # NEW: scan all property categories
+    search_urls = [
+
+        f"{BASE}/apartments/{slug}",
+        f"{BASE}/houses/{slug}",
+        f"{BASE}/studios/{slug}",
+        f"{BASE}/rooms/{slug}"
+
+    ]
 
     print(f"Scanning {city}...")
 
+    listings = []
+    seen = set()
+
     try:
 
-        await page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=10000
-        )
-
-        await page.wait_for_timeout(1500)
-
-        cards = page.locator("a[href*='-for-rent/']")
-        count = await cards.count()
-
-        listings = []
-        seen = set()
-
-        for i in range(count):
-
-            card = cards.nth(i)
+        for url in search_urls:
 
             try:
 
-                href = await card.get_attribute("href")
+                await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=10000
+                )
 
-                if not href:
-                    continue
+                await page.wait_for_timeout(1200)
 
-                link = href if href.startswith("http") else BASE + href
+                cards = page.locator("a[href*='-for-rent/']")
+                count = await cards.count()
 
-                if link in seen:
-                    continue
+                for i in range(count):
 
-                seen.add(link)
+                    card = cards.nth(i)
 
-                # -------------------------
-                # Get FULL property card
-                # -------------------------
+                    try:
 
-                container = card.locator("xpath=ancestor::section[1]")
+                        href = await card.get_attribute("href")
 
-                if await container.count() == 0:
-                    container = card.locator("xpath=ancestor::article[1]")
+                        if not href:
+                            continue
 
-                if await container.count() == 0:
-                    container = card.locator("xpath=..")
+                        link = href if href.startswith("http") else BASE + href
 
-                text = await container.inner_text()
+                        # Prevent duplicates across categories
+                        if link in seen:
+                            continue
 
-                slug = link.split("/")[-1]
-                title = slug.replace("-"," ").title()
+                        seen.add(link)
 
-                # -------------------------
-                # Price
-                # -------------------------
+                        # Keep exactly the same extraction logic
+                        container = card.locator("xpath=ancestor::section[1]")
 
-                price = ""
-                price_value = 0
+                        if await container.count() == 0:
+                            container = card.locator("xpath=ancestor::article[1]")
 
-                m = re.search(r"€\s*([\d.,]+)", text)
+                        if await container.count() == 0:
+                            container = card.locator("xpath=..")
 
-                if m:
+                        text = await container.inner_text()
 
-                    price = "€" + m.group(1)
-                    price_value = int(re.sub(r"[^\d]","",m.group(1)))
+                        slug_title = link.split("/")[-1]
+                        title = slug_title.replace("-", " ").title()
 
-                # -------------------------
-                # Rooms
-                # -------------------------
+                        # ---------------- Price ----------------
 
-                rooms = 0
+                        price = ""
+                        price_value = 0
 
-                m = re.search(r"(\d+)\s*rooms?", text, re.I)
+                        m = re.search(r"€\s*([\d.,]+)", text)
 
-                if m:
-                    rooms = int(m.group(1))
+                        if m:
+                            price = "€" + m.group(1)
+                            price_value = int(
+                                re.sub(r"[^\d]", "", m.group(1))
+                            )
 
-                # -------------------------
-                # Area
-                # -------------------------
+                        # ---------------- Rooms ----------------
 
-                area = 0
+                        rooms = 0
 
-                m = re.search(r"(\d+)\s*m²", text)
+                        m = re.search(r"(\d+)\s*rooms?", text, re.I)
 
-                if m:
-                    area = int(m.group(1))
+                        if m:
+                            rooms = int(m.group(1))
 
-                listings.append({
+                        # ---------------- Area ----------------
 
-                    "city": city,
-                    "title": title,
-                    "price": price,
-                    "price_value": price_value,
-                    "rooms": rooms,
-                    "area": area,
-                    "score": score_listing(
-                        city,
-                        text,
-                        price_value,
-                        rooms,
-                        area
-                    ),
-                    "url": link
+                        area = 0
 
-                })
+                        m = re.search(r"(\d+)\s*m²", text)
+
+                        if m:
+                            area = int(m.group(1))
+
+                        listings.append({
+
+                            "city": city,
+                            "title": title,
+                            "price": price,
+                            "price_value": price_value,
+                            "rooms": rooms,
+                            "area": area,
+                            "score": score_listing(
+                                city,
+                                text,
+                                price_value,
+                                rooms,
+                                area
+                            ),
+                            "url": link
+
+                        })
+
+                    except:
+                        continue
 
             except:
+                # Some cities may not have all categories
                 continue
 
         print(f"✓ {city}: {len(listings)} listings")
@@ -298,18 +296,18 @@ async def production_scan():
             ]
         )
 
-        print("="*60)
+        print("=" * 60)
         print("SCANNING ALL CITIES")
-        print("="*60)
+        print("=" * 60)
 
         tasks = [
-            scan_city(browser,city)
+            scan_city(browser, city)
             for city in config["preferred_locations"]
         ]
 
         results = await asyncio.gather(*tasks)
 
-        all_listings=[]
+        all_listings = []
 
         for city_results in results:
             all_listings.extend(city_results)
@@ -333,9 +331,11 @@ if DEBUG_SEND:
 else:
 
     new_listings = [
+
         item
         for item in all_listings
         if item["url"] not in visited_urls
+
     ]
 
     new_listings = filter_launch_listings(
@@ -344,7 +344,7 @@ else:
     )
 
 new_listings.sort(
-    key=lambda x:x["score"],
+    key=lambda x: x["score"],
     reverse=True
 )
 
@@ -352,13 +352,13 @@ new_listings.sort(
 # Quality check
 # ==========================================================
 
-print("="*60)
+print("=" * 60)
 print("TOP 10 SCORED LISTINGS")
-print("="*60)
+print("=" * 60)
 
 if new_listings:
 
-    for i,item in enumerate(new_listings[:10],1):
+    for i, item in enumerate(new_listings[:10], 1):
 
         print(
             f"{i:>2}. "
@@ -378,37 +378,37 @@ else:
 # Summary
 # ==========================================================
 
-print("="*60)
+print("=" * 60)
 print("SCAN SUMMARY")
-print("="*60)
+print("=" * 60)
 
-summary={}
+summary = {}
 
 for item in all_listings:
-    summary[item["city"]]=summary.get(item["city"],0)+1
+    summary[item["city"]] = summary.get(item["city"], 0) + 1
 
 for city in config["preferred_locations"]:
     print(f"{city:<24} {summary.get(city,0)}")
 
-print("-"*60)
+print("-" * 60)
 print(f"Total listings found : {len(all_listings)}")
 print(f"Known URLs           : {len(visited_urls)}")
 print(f"Listings to send     : {len(new_listings)}")
 
 # ==========================================================
-# Telegram
+# Telegram alerts
 # ==========================================================
 
-TOP_LIMIT=10
+TOP_LIMIT = 10
 
-print("-"*60)
-print(f"Sending top {min(len(new_listings),TOP_LIMIT)} alerts...")
-print("-"*60)
+print("-" * 60)
+print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
+print("-" * 60)
 
-for i,listing in enumerate(new_listings[:TOP_LIMIT]):
+for i, listing in enumerate(new_listings[:TOP_LIMIT]):
 
     try:
-        send_property_alert(listing,i)
+        send_property_alert(listing, i)
 
     except Exception as e:
         print(f"Telegram failed: {listing['title']} ({e})")
@@ -417,14 +417,16 @@ for i,listing in enumerate(new_listings[:TOP_LIMIT]):
 # Save tracker
 # ==========================================================
 
-write_header=not TRACKER_FILE.exists()
+write_header = not TRACKER_FILE.exists()
 
-with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
+with open(TRACKER_FILE, "a", newline="", encoding="utf-8") as f:
 
-    writer=csv.writer(f)
+    writer = csv.writer(f)
 
     if write_header:
+
         writer.writerow([
+
             "Date",
             "City",
             "Title",
@@ -433,12 +435,15 @@ with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
             "Area",
             "Score",
             "URL"
+
         ])
 
-    now=datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     for item in new_listings:
+
         writer.writerow([
+
             now,
             item["city"],
             item["title"],
@@ -447,6 +452,7 @@ with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
             item["area"],
             item["score"],
             item["url"]
+
         ])
 
 # ==========================================================
@@ -455,10 +461,10 @@ with open(TRACKER_FILE,"a",newline="",encoding="utf-8") as f:
 
 visited_urls.update(item["url"] for item in all_listings)
 
-with open(VISITED_FILE,"w",encoding="utf-8") as f:
-    json.dump(sorted(visited_urls),f,indent=2)
+with open(VISITED_FILE, "w", encoding="utf-8") as f:
+    json.dump(sorted(visited_urls), f, indent=2)
 
-print("-"*60)
+print("-" * 60)
 print("Database updated.")
 print(f"Tracker file: {TRACKER_FILE.name}")
-print("-"*60)
+print("-" * 60)
