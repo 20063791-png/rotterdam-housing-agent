@@ -1,5 +1,6 @@
 import os
 import re
+import hashlib
 import requests
 import asyncio
 from playwright.async_api import async_playwright
@@ -34,6 +35,18 @@ def extract_city_from_url(url: str) -> str:
         return m.group(1).replace("-", " ").title()
 
     return "Unknown"
+
+
+# ==========================================================
+# Stable Property ID (NEW)
+# ==========================================================
+
+def property_uid(url: str) -> str:
+    """
+    Create a permanent 8-character ID from the property URL.
+    This never changes between scans.
+    """
+    return hashlib.md5(url.encode()).hexdigest()[:8]
 
 
 # ==========================================================
@@ -75,26 +88,22 @@ async def fetch_listing_details(url):
             text = await page.text_content("body") or ""
             lower = text.lower()
 
-            # ---------------- Price ----------------
-
+            # Price
             m = re.search(r"€\s?[\d.,]+", text)
             if m:
                 details["price"] = m.group(0)
 
-            # ---------------- Rooms ----------------
-
+            # Rooms
             m = re.search(r"(\d+)\s+rooms?", text, re.I)
             if m:
                 details["rooms"] = m.group(1)
 
-            # ---------------- Area ----------------
-
+            # Area
             m = re.search(r"(\d+)\s?m²", text)
             if m:
                 details["area"] = m.group(1)
 
-            # ---------------- Furnishing ----------------
-
+            # Furnishing
             details["furnished"] = (
                 "furnished" in lower or
                 "gemeubileerd" in lower
@@ -105,8 +114,7 @@ async def fetch_listing_details(url):
                 "gestoffeerd" in lower
             )
 
-            # ---------------- Quick Highlights ----------------
-
+            # Quick highlights
             keywords = {
                 "balcony": "Balcony",
                 "garden": "Garden",
@@ -130,8 +138,7 @@ async def fetch_listing_details(url):
 
             details["summary"] = details["summary"][:3]
 
-            # ---------------- First usable image ----------------
-
+            # First usable image
             imgs = await page.locator("img").evaluate_all("""
             imgs => imgs
                 .map(i => i.src)
@@ -198,14 +205,13 @@ def send_property_alert(property_data, index=0):
 
     details = asyncio.run(fetch_listing_details(property_data["url"]))
 
-    # Always use city from URL
-
     city = extract_city_from_url(property_data["url"])
 
     property_for_ai = property_data.copy()
     property_for_ai["city"] = city
 
-    # Prefer scanner values
+    # NEW permanent ID
+    uid = property_uid(property_data["url"])
 
     price = (
         f"€{property_data['price']}"
@@ -239,10 +245,8 @@ def send_property_alert(property_data, index=0):
 
     if score >= 90:
         priority = "🔥 HIGH PRIORITY"
-
     elif score >= 75:
         priority = "⭐ STRONG MATCH"
-
     else:
         priority = "📍 NEW LISTING"
 
@@ -263,7 +267,6 @@ def send_property_alert(property_data, index=0):
 
     if furnished:
         message += "\n🛋 Furnished"
-
     elif upholstered:
         message += "\n🪑 Upholstered"
 
@@ -283,7 +286,7 @@ def send_property_alert(property_data, index=0):
     message += f"\n\n🔗 {property_data['url']}"
 
     # ======================================================
-    # UPDATED BUTTONS
+    # UPDATED BUTTONS (NEW)
     # ======================================================
 
     keyboard = {
@@ -307,18 +310,18 @@ def send_property_alert(property_data, index=0):
             [
                 {
                     "text": "🟢 Applied",
-                    "callback_data": f"applied_{index}"
+                    "callback_data": f"applied|{uid}"
                 },
                 {
                     "text": "📌 Save Later",
-                    "callback_data": f"save_{index}"
+                    "callback_data": f"save|{uid}"
                 }
             ],
 
             [
                 {
                     "text": "❌ Reject",
-                    "callback_data": f"reject_{index}"
+                    "callback_data": f"reject|{uid}"
                 }
             ]
         ]
