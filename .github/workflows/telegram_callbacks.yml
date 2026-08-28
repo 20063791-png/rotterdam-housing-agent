@@ -2,15 +2,12 @@ name: Telegram Callbacks
 
 on:
   workflow_dispatch:
+
   schedule:
     - cron: "*/5 * * * *"
 
 permissions:
   contents: write
-
-concurrency:
-  group: telegram-callbacks
-  cancel-in-progress: true
 
 jobs:
   callbacks:
@@ -28,7 +25,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install pandas requests playwright
           pip install -r requirements.txt
+          playwright install chromium
 
       - name: Run callback handler
         env:
@@ -41,6 +40,9 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
           git add 05_Python/Database/*.csv 05_Python/Database/*.json
+
           git diff --cached --quiet || git commit -m "Update callback database"
+
           git push
