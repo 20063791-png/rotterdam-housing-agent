@@ -6,25 +6,54 @@ import asyncio
 from playwright.async_api import async_playwright
 
 # ==========================================================
-# Telegram Configuration (UNCHANGED)
+# Telegram Configuration
 # ==========================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
-CHAT_ID = os.getenv("CHAT_ID") or "8674673640"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN"
+CHAT_ID = os.getenv("CHAT_ID") or "YOUR_CHAT_ID"
 
 # ==========================================================
-# Get correct city from Pararius URL
+# Stable Property ID
 # ==========================================================
 
-def extract_city_from_url(url: str) -> str:
+def property_uid(url: str) -> str:
     """
-    Extract city from Pararius URLs.
-
-    apartment-for-rent/delft/...    -> Delft
-    room-for-rent/schiedam/...      -> Schiedam
-    house-for-rent/rotterdam/...    -> Rotterdam
-    studio-for-rent/vlaardingen/... -> Vlaardingen
+    Generate a permanent ID from the URL.
+    Only used if property_id does not already exist.
     """
+    return hashlib.md5(url.encode()).hexdigest()[:8]
+
+# ==========================================================
+# Safe City Extractor
+# ==========================================================
+
+def get_city(property_data):
+
+    city = str(property_data.get("city", "")).strip()
+
+    if city and city.lower() != "nan":
+        return city
+
+    address = str(property_data.get("address", "")).strip()
+
+    if address:
+
+        for c in [
+            "Rotterdam",
+            "Schiedam",
+            "Delft",
+            "Ridderkerk",
+            "Vlaardingen",
+            "Barendrecht",
+            "Spijkenisse",
+            "Dordrecht",
+            "Capelle aan den IJssel"
+        ]:
+
+            if c.lower() in address.lower():
+                return c
+
+    url = property_data["url"]
 
     m = re.search(
         r"/(?:apartment|room|house|studio)-for-rent/([^/]+)/",
@@ -35,19 +64,6 @@ def extract_city_from_url(url: str) -> str:
         return m.group(1).replace("-", " ").title()
 
     return "Unknown"
-
-
-# ==========================================================
-# Stable Property ID (NEW)
-# ==========================================================
-
-def property_uid(url: str) -> str:
-    """
-    Create a permanent 8-character ID from the property URL.
-    This never changes between scans.
-    """
-    return hashlib.md5(url.encode()).hexdigest()[:8]
-
 
 # ==========================================================
 # Fast Property Detail Extractor
@@ -88,22 +104,18 @@ async def fetch_listing_details(url):
             text = await page.text_content("body") or ""
             lower = text.lower()
 
-            # Price
             m = re.search(r"€\s?[\d.,]+", text)
             if m:
                 details["price"] = m.group(0)
 
-            # Rooms
             m = re.search(r"(\d+)\s+rooms?", text, re.I)
             if m:
                 details["rooms"] = m.group(1)
 
-            # Area
             m = re.search(r"(\d+)\s?m²", text)
             if m:
                 details["area"] = m.group(1)
 
-            # Furnishing
             details["furnished"] = (
                 "furnished" in lower or
                 "gemeubileerd" in lower
@@ -114,7 +126,6 @@ async def fetch_listing_details(url):
                 "gestoffeerd" in lower
             )
 
-            # Quick highlights
             keywords = {
                 "balcony": "Balcony",
                 "garden": "Garden",
@@ -128,7 +139,6 @@ async def fetch_listing_details(url):
 
             if details["furnished"]:
                 details["summary"].append("Furnished")
-
             elif details["upholstered"]:
                 details["summary"].append("Upholstered")
 
@@ -138,7 +148,6 @@ async def fetch_listing_details(url):
 
             details["summary"] = details["summary"][:3]
 
-            # First usable image
             imgs = await page.locator("img").evaluate_all("""
             imgs => imgs
                 .map(i => i.src)
@@ -160,9 +169,8 @@ async def fetch_listing_details(url):
 
     return details
 
-
 # ==========================================================
-# AI Message Builder
+# AI Message
 # ==========================================================
 
 def build_ai_message(property_data):
@@ -171,27 +179,19 @@ def build_ai_message(property_data):
 
 My name is Grifton Muchovu.
 
-I am relocating to Rotterdam to work as a researcher at Erasmus MC on a long-term employment contract, and I am very interested in the property at {property_data['title']} in {property_data['city']}.
-
-A little about me:
+I am relocating to Rotterdam to work as a researcher at Erasmus MC and I am very interested in the property at {property_data['title']} in {property_data['city']}.
 
 • Researcher at Erasmus MC
-• Stable employment contract and reliable monthly income
+• Stable employment contract
+• Reliable monthly income
 • Non-smoker
-• Quiet, clean and respectful tenant
 • Looking for a long-term home
-• Municipal registration (inschrijving) required
-• References and proof of income available immediately
-
-I value a peaceful and well-maintained home and always take good care of the place where I live.
-
-I would be happy to arrange a viewing at your convenience.
+• Registration required
+• References available
 
 Kind regards,
 
-Grifton Muchovu
-Erasmus MC Researcher"""
-
+Grifton Muchovu"""
 
 # ==========================================================
 # Telegram Sender
@@ -205,13 +205,23 @@ def send_property_alert(property_data, index=0):
 
     details = asyncio.run(fetch_listing_details(property_data["url"]))
 
-    city = extract_city_from_url(property_data["url"])
+    city = get_city(property_data)
 
     property_for_ai = property_data.copy()
     property_for_ai["city"] = city
 
-    # NEW permanent ID
-    uid = property_uid(property_data["url"])
+    # ------------------------------------------------------
+    # IMPORTANT FIX
+    # ------------------------------------------------------
+
+    uid = str(
+        property_data.get(
+            "property_id",
+            property_uid(property_data["url"])
+        )
+    )
+
+    print(f"Sending property: {uid}")
 
     price = (
         f"€{property_data['price']}"
@@ -219,17 +229,8 @@ def send_property_alert(property_data, index=0):
         else details["price"] or "Price on listing"
     )
 
-    rooms = (
-        str(property_data["rooms"])
-        if property_data.get("rooms")
-        else details["rooms"]
-    )
-
-    area = (
-        str(property_data["area"])
-        if property_data.get("area")
-        else details["area"]
-    )
+    rooms = str(property_data.get("rooms") or details["rooms"])
+    area = str(property_data.get("area") or details["area"])
 
     furnished = (
         property_data.get("furnished", False)
@@ -259,10 +260,10 @@ def send_property_alert(property_data, index=0):
 
 💶 <b>{price}</b>"""
 
-    if rooms:
+    if rooms and rooms != "None":
         message += f"\n🛏 {rooms} room"
 
-    if area:
+    if area and area != "None":
         message += f"\n📐 {area} m²"
 
     if furnished:
@@ -277,17 +278,13 @@ def send_property_alert(property_data, index=0):
     if details["summary"]:
         extras = [
             x for x in details["summary"]
-            if x not in ["Furnished", "Upholstered"]
+            if x not in ["Furnished", "UpHolstered"]
         ]
 
         if extras:
             message += "\n\n✨ " + " • ".join(extras)
 
     message += f"\n\n🔗 {property_data['url']}"
-
-    # ======================================================
-    # UPDATED BUTTONS (NEW)
-    # ======================================================
 
     keyboard = {
         "inline_keyboard": [
@@ -303,7 +300,7 @@ def send_property_alert(property_data, index=0):
                 {
                     "text": "✍️ Copy AI Message",
                     "switch_inline_query_current_chat":
-                    build_ai_message(property_for_ai)
+                        build_ai_message(property_for_ai)
                 }
             ],
 
@@ -327,10 +324,6 @@ def send_property_alert(property_data, index=0):
         ]
     }
 
-    # ======================================================
-    # Try Photo First
-    # ======================================================
-
     if details["image"]:
 
         photo_response = requests.post(
@@ -349,14 +342,7 @@ def send_property_alert(property_data, index=0):
             print(f"Telegram photo sent: {property_data['title']}")
             return
 
-        print(
-            f"Photo failed for {property_data['title']}. "
-            "Using text fallback."
-        )
-
-    # ======================================================
-    # Guaranteed Text Fallback
-    # ======================================================
+        print("Photo failed. Using text.")
 
     text_response = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -375,7 +361,6 @@ def send_property_alert(property_data, index=0):
     else:
         print(text_response.text)
 
-
 # ==========================================================
 # Local Test
 # ==========================================================
@@ -384,6 +369,7 @@ if __name__ == "__main__":
 
     send_property_alert(
         {
+            "property_id": "TEST1234",
             "title": "Test Property",
             "city": "Rotterdam",
             "score": 80,
