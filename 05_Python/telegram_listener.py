@@ -149,9 +149,7 @@ def send_property_alert(property_data, index=0):
     )
 
     rooms = property_data.get("rooms") or details["rooms"] or "?"
-
     area = property_data.get("area") or details["area"] or "?"
-
     score = property_data.get("score", 0)
 
     if score >= 80:
@@ -179,7 +177,7 @@ def send_property_alert(property_data, index=0):
     message += f"\n\n🔗 {property_data['url']}"
 
     # ======================================================
-    # Buttons
+    # SIMPLE STABLE BUTTONS ONLY
     # ======================================================
 
     keyboard = {
@@ -197,25 +195,8 @@ def send_property_alert(property_data, index=0):
                     "text": "📋 Copy All Message",
                     "switch_inline_query_current_chat": build_ai_message(property_for_ai)
                 }
-            ],
-
-            [
-                {
-                    "text": "🟢 Applied",
-                    "callback_data": f"applied_{index}"
-                },
-                {
-                    "text": "📌 Save Later",
-                    "callback_data": f"save_{index}"
-                }
-            ],
-
-            [
-                {
-                    "text": "❌ Reject",
-                    "callback_data": f"reject_{index}"
-                }
             ]
+
         ]
     }
 
