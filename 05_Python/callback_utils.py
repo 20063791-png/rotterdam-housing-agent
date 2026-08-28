@@ -13,6 +13,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
 
 
 def finish_message(chat_id, message_id, title, city, status):
+    """
+    Update the original Telegram card after a button press.
+    Falls back to a new confirmation message if editing fails.
+    """
 
     icons = {
         "Applied": "🟢",
@@ -22,7 +26,7 @@ def finish_message(chat_id, message_id, title, city, status):
 
     text = (
         f"🏠 <b>Housing Agent v12</b>\n\n"
-        f"{icons[status]} <b>{status} ✓</b>\n\n"
+        f"{icons.get(status,'📍')} <b>{status} ✓</b>\n\n"
         f"<b>{title}</b>\n"
         f"🏙 {city}\n\n"
     )
@@ -33,39 +37,74 @@ def finish_message(chat_id, message_id, title, city, status):
     elif status == "Rejected":
         text += "Listing removed.\nWon't appear again."
 
-    else:
+    elif status == "Saved":
         text += "Reminder scheduled.\nDaily at 21:00 for up to 72 hours."
 
     print("-" * 60)
     print("Editing Telegram message...")
-    print(f"Chat: {chat_id}")
-    print(f"Message: {message_id}")
-    print(f"Status: {status}")
-
-    response = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-        json={
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        },
-        timeout=20
-    )
-
-    print(f"HTTP Status: {response.status_code}")
+    print(f"Chat ID   : {chat_id}")
+    print(f"Message ID: {message_id}")
+    print(f"Status    : {status}")
+    print(f"Property  : {title}")
 
     try:
-        result = response.json()
-        print("Telegram response:")
-        print(json.dumps(result, indent=2))
-    except Exception:
-        print(response.text)
 
-    if not response.ok:
-        print("editMessageText failed.")
-        return False
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True
+            },
+            timeout=20
+        )
 
-    print("Message updated successfully.")
-    return True
+        print(f"HTTP Status: {response.status_code}")
+
+        try:
+            result = response.json()
+            print("Telegram response:")
+            print(json.dumps(result, indent=2))
+        except Exception:
+            print(response.text)
+
+        if response.ok:
+            print("Message updated successfully.")
+            return True
+
+        print("editMessageText failed. Sending fallback message.")
+
+    except Exception as e:
+        print(f"Telegram edit failed: {e}")
+
+    # ----------------------------------------------------------
+    # FALLBACK
+    # ----------------------------------------------------------
+
+    try:
+
+        fallback = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True
+            },
+            timeout=20
+        )
+
+        print(f"Fallback HTTP Status: {fallback.status_code}")
+
+        if fallback.ok:
+            print("Fallback confirmation sent.")
+            return True
+
+        print(fallback.text)
+
+    except Exception as e:
+        print(f"Fallback failed: {e}")
+
+    return False
