@@ -36,31 +36,13 @@ def finish_message(chat_id, message_id, title, city, status):
     else:
         text += "Reminder scheduled.\nDaily at 21:00 for up to 72 hours."
 
-    print("-" * 60)
-    print("Editing Telegram message...")
-    print(f"Chat: {chat_id}")
-    print(f"Message: {message_id}")
-    print(f"Status: {status}")
-
-    response = requests.post(
+    requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
         json={
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-            "reply_markup": {"inline_keyboard": []}
+            "parse_mode": "HTML"
         },
         timeout=20
     )
-
-    print(f"HTTP Status: {response.status_code}")
-
-    try:
-        result = response.json()
-        print(json.dumps(result, indent=2))
-    except Exception:
-        print(response.text)
-
-    return response.ok
