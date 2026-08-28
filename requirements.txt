@@ -1,4 +1,6 @@
 playwright
 beautifulsoup4
 requests
+pandas
 pypararius
+lxml
