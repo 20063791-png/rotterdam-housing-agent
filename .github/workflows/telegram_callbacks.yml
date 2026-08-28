@@ -1,0 +1,37 @@
+name: Telegram Callbacks
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "*/5 * * * *"
+
+jobs:
+  callbacks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run callback handler
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python 05_Python/telegram_callbacks.py
+
+      - name: Commit database changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add 05_Python/Database/*.csv 05_Python/Database/*.json
+          git diff --cached --quiet || git commit -m "Update callback database"
+          git push
