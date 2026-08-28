@@ -2,59 +2,29 @@ from pathlib import Path
 import json
 import requests
 import pandas as pd
+import os
 from datetime import datetime
-
-# ==========================================================
-# Paths
-# ==========================================================
 
 ROOT = Path(__file__).resolve().parent
 
-CONFIG = ROOT / "Config" / "config.json"
-TRACKER = ROOT / "Database" / "housing_tracker.csv"
-LOG = ROOT / "Database" / "applications_log.csv"
-STATUS = ROOT / "Database" / "listing_status.json"
-
-# ==========================================================
-# Load configuration
-# ==========================================================
+CONFIG = ROOT / "Config/config.json"
+TRACKER = ROOT / "Database/housing_tracker.csv"
+LOG = ROOT / "Database/applications_log.csv"
+STATUS = ROOT / "Database/listing_status.json"
 
 with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
-TOKEN = cfg["telegram"]["bot_token"]
-
-# ==========================================================
-# Load tracker
-# ==========================================================
+TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
 
 tracker = pd.read_csv(TRACKER)
-
-# Ensure required columns exist
-
-for col in ["status", "saved_at"]:
-    if col not in tracker.columns:
-        tracker[col] = ""
-
-# ==========================================================
-# Load application log
-# ==========================================================
 
 if LOG.exists():
     log = pd.read_csv(LOG)
 else:
     log = pd.DataFrame(columns=[
-        "time",
-        "url",
-        "title",
-        "price",
-        "decision",
-        "status"
+        "time", "url", "title", "price", "decision", "status"
     ])
-
-# ==========================================================
-# Load listing status database
-# ==========================================================
 
 if STATUS.exists():
     with open(STATUS, "r", encoding="utf-8") as f:
@@ -62,19 +32,12 @@ if STATUS.exists():
 else:
     listing_status = {}
 
-# ==========================================================
-# Telegram Updates
-# ==========================================================
-
 updates = requests.get(
-    f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+    f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+    timeout=20
 ).json()
 
 processed = 0
-
-# ==========================================================
-# Process callbacks
-# ==========================================================
 
 for item in updates.get("result", []):
 
@@ -83,12 +46,16 @@ for item in updates.get("result", []):
     if callback is None:
         continue
 
+    data = callback["data"]
+
+    if "_" not in data:
+        continue
+
+    action, index = data.split("_", 1)
+
     try:
-
-        action, index = callback["data"].split("|")
         index = int(index)
-
-    except Exception:
+    except:
         continue
 
     if index >= len(tracker):
@@ -99,61 +66,21 @@ for item in updates.get("result", []):
     chat = callback["message"]["chat"]["id"]
     msg = callback["message"]["message_id"]
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
     url = prop["url"]
 
-    # ------------------------------------------------------
-    # AI Message
-    # ------------------------------------------------------
+    # ---------------- Applied ----------------
 
-    if action == "message":
-
-        ai = f"""Hello,
-
-My name is Grifton Muchovu.
-
-I am relocating to Rotterdam to work as a researcher at Erasmus MC on a long-term employment contract, and I am very interested in the property at {prop['title']} in {prop['city']}.
-
-A little about me:
-
-• Researcher at Erasmus MC
-• Stable employment contract
-• Reliable monthly income
-• Non-smoker
-• Quiet, clean and respectful tenant
-• Looking for a long-term home
-• Municipal registration required
-• References available immediately
-
-I would be happy to arrange a viewing.
-
-Kind regards,
-
-Grifton Muchovu"""
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={
-                "chat_id": chat,
-                "text": ai
-            }
-        )
-
-    # ------------------------------------------------------
-    # Applied
-    # ------------------------------------------------------
-
-    elif action == "applied":
+    if action == "applied":
 
         tracker.loc[index, "status"] = "Applied"
 
         listing_status[url] = {
             "status": "Applied",
-            "updated": now
+            "time": datetime.now().isoformat()
         }
 
         log.loc[len(log)] = [
-            now,
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
             url,
             prop["title"],
             prop["price"],
@@ -166,22 +93,19 @@ Grifton Muchovu"""
             json={
                 "chat_id": chat,
                 "message_id": msg,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "🟢 Applied",
-                                "callback_data": "done"
-                            }
-                        ]
-                    ]
-                }
+                "reply_markup": {"inline_keyboard": []}
             }
         )
 
-    # ------------------------------------------------------
-    # Rejected
-    # ------------------------------------------------------
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id": chat,
+                "text": f"🟢 Applied saved for:\n{prop['title']}"
+            }
+        )
+
+    # ---------------- Reject ----------------
 
     elif action == "reject":
 
@@ -189,7 +113,7 @@ Grifton Muchovu"""
 
         listing_status[url] = {
             "status": "Rejected",
-            "updated": now
+            "time": datetime.now().isoformat()
         }
 
         requests.post(
@@ -197,56 +121,38 @@ Grifton Muchovu"""
             json={
                 "chat_id": chat,
                 "message_id": msg,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "❌ Rejected",
-                                "callback_data": "done"
-                            }
-                        ]
-                    ]
-                }
+                "reply_markup": {"inline_keyboard": []}
             }
         )
 
-    # ------------------------------------------------------
-    # Save For Later
-    # ------------------------------------------------------
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id": chat,
+                "text": f"❌ Rejected:\n{prop['title']}"
+            }
+        )
+
+    # ---------------- Save ----------------
 
     elif action == "save":
 
         tracker.loc[index, "status"] = "Saved"
-        tracker.loc[index, "saved_at"] = now
 
         listing_status[url] = {
             "status": "Saved",
-            "saved_at": now
+            "time": datetime.now().isoformat()
         }
 
         requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/editMessageReplyMarkup",
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
             json={
                 "chat_id": chat,
-                "message_id": msg,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "💾 Saved for Later",
-                                "callback_data": "done"
-                            }
-                        ]
-                    ]
-                }
+                "text": f"📌 Saved for later:\n{prop['title']}"
             }
         )
 
     processed += 1
-
-# ==========================================================
-# Save files
-# ==========================================================
 
 tracker.to_csv(TRACKER, index=False)
 log.to_csv(LOG, index=False)
@@ -254,17 +160,14 @@ log.to_csv(LOG, index=False)
 with open(STATUS, "w", encoding="utf-8") as f:
     json.dump(listing_status, f, indent=2)
 
-# ==========================================================
 # Clear processed updates
-# ==========================================================
 
 if updates.get("result"):
-
     last = max(u["update_id"] for u in updates["result"])
-
     requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getUpdates",
-        params={"offset": last + 1}
+        params={"offset": last + 1},
+        timeout=20
     )
 
 print(f"Processed {processed} callbacks.")
