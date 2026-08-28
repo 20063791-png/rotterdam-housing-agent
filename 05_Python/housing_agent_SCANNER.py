@@ -52,8 +52,6 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     score = 0
     text = text.lower()
 
-    # ---------------- City (20) ----------------
-
     city_points = {
         "rotterdam": 20,
         "schiedam": 18,
@@ -68,15 +66,10 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
 
     score += city_points.get(city.lower(), 8)
 
-    # ---------------- Furnishing (30) ----------------
-
     if "furnished" in text:
         score += 30
-
     elif "upholstered" in text:
         score += 18
-
-    # ---------------- Budget (30) ----------------
 
     if price_value:
 
@@ -95,26 +88,17 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
         elif price_value <= config["filters"]["absolute_max_price"]:
             score += 10
 
-    # ---------------- Registration (8) ----------------
-
     if "registration" in text:
         score += 8
 
-    # ---------------- Area (7) ----------------
-
     if area >= 80:
         score += 7
-
     elif area >= 60:
         score += 5
-
     elif area >= 40:
         score += 4
-
     elif area >= config["filters"]["minimum_area"]:
         score += 2
-
-    # ---------------- Nice-to-have (5) ----------------
 
     bonus = 0
 
@@ -127,14 +111,10 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     return min(score, 100)
 
 # ==========================================================
-# Real city detection (ONLY NEW PATCH)
+# Real city detection
 # ==========================================================
 
 async def get_listing_city(page, default_city):
-    """
-    Reads the actual city from the listing page.
-    Falls back to the search city if not found.
-    """
 
     try:
         body = (await page.text_content("body") or "").lower()
@@ -176,14 +156,11 @@ async def scan_city(browser, city):
 
     slug = city.lower().replace(" ", "-")
 
-    # Search every property category
     search_urls = [
-
         f"{BASE}/apartments/{slug}",
         f"{BASE}/houses/{slug}",
         f"{BASE}/studios/{slug}",
         f"{BASE}/rooms/{slug}"
-
     ]
 
     print(f"Scanning {city}...")
@@ -226,8 +203,6 @@ async def scan_city(browser, city):
 
                         seen.add(link)
 
-                        # Keep exactly the same extraction logic
-
                         container = card.locator("xpath=ancestor::section[1]")
 
                         if await container.count() == 0:
@@ -241,8 +216,6 @@ async def scan_city(browser, city):
                         slug_title = link.split("/")[-1]
                         title = slug_title.replace("-", " ").title()
 
-                        # ---------------- Price ----------------
-
                         price = ""
                         price_value = 0
 
@@ -254,16 +227,12 @@ async def scan_city(browser, city):
                                 re.sub(r"[^\d]", "", m.group(1))
                             )
 
-                        # ---------------- Rooms ----------------
-
                         rooms = 0
 
                         m = re.search(r"(\d+)\s*rooms?", text, re.I)
 
                         if m:
                             rooms = int(m.group(1))
-
-                        # ---------------- Area ----------------
 
                         area = 0
 
@@ -272,7 +241,6 @@ async def scan_city(browser, city):
                         if m:
                             area = int(m.group(1))
 
-                        # ONLY CHANGE: detect the real city
                         real_city = await get_listing_city(page, city)
 
                         listings.append({
@@ -298,7 +266,6 @@ async def scan_city(browser, city):
                         continue
 
             except:
-                # Some cities simply won't have all categories.
                 continue
 
         print(f"✓ {city}: {len(listings)} listings")
@@ -436,13 +403,11 @@ print(f"Listings to send     : {len(new_listings)}")
 # Telegram alerts
 # ==========================================================
 
-TOP_LIMIT = 10
-
 print("-" * 60)
-print(f"Sending top {min(len(new_listings), TOP_LIMIT)} alerts...")
+print(f"Sending {len(new_listings)} new listings...")
 print("-" * 60)
 
-for i, listing in enumerate(new_listings[:TOP_LIMIT]):
+for i, listing in enumerate(new_listings):
 
     try:
         send_property_alert(listing, i)
