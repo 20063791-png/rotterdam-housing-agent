@@ -88,9 +88,30 @@ def get_city(prop):
     )
 
     if m:
-        return m.group(1)
+        return m.group(1).title()
 
     return "Unknown"
+
+# ------------------------------------------------------------
+# Telegram helper
+# ------------------------------------------------------------
+
+def answer_callback(callback_id, text="Processing..."):
+    """
+    Safely answer callback so Telegram immediately shows feedback.
+    """
+
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+            json={
+                "callback_query_id": callback_id,
+                "text": text
+            },
+            timeout=20
+        )
+    except Exception as e:
+        print(f"Callback acknowledgement failed: {e}")
 
 # ------------------------------------------------------------
 # Process callbacks
@@ -111,6 +132,7 @@ for item in updates.get("result", []):
     print(f"Callback data: {data}")
 
     if "_" not in data:
+        print("Invalid callback format.")
         continue
 
     action, index = data.split("_", 1)
@@ -130,41 +152,32 @@ for item in updates.get("result", []):
     chat = callback["message"]["chat"]["id"]
     msg = callback["message"]["message_id"]
 
-    url = prop["url"]
+    url = str(prop.get("url", ""))
     title = str(prop.get("title", "Unknown Property"))
     city = get_city(prop)
+    price = prop.get("price", "")
 
     print(f"Listing: {title}")
     print(f"City: {city}")
+    print(f"Current Status: {prop.get('status','')}")
 
     # --------------------------------------------------------
-    # Immediate Telegram acknowledgement
+    # Immediate acknowledgement
     # --------------------------------------------------------
 
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
-        json={
-            "callback_query_id": callback["id"],
-            "text": "Processing..."
-        },
-        timeout=20
-    )
+    answer_callback(callback["id"], "⏳ Processing...")
 
     current_status = str(prop.get("status", "")).strip()
 
     # --------------------------------------------------------
-    # Prevent duplicate processing
+    # Prevent duplicate actions
     # --------------------------------------------------------
 
     if current_status in ["Applied", "Rejected"]:
 
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
-            json={
-                "callback_query_id": callback["id"],
-                "text": f"Already {current_status.lower()}."
-            },
-            timeout=20
+        answer_callback(
+            callback["id"],
+            f"Already {current_status.lower()}."
         )
 
         print(f"Already {current_status}.")
@@ -184,7 +197,7 @@ for item in updates.get("result", []):
             datetime.now().strftime("%Y-%m-%d %H:%M"),
             url,
             title,
-            prop.get("price", ""),
+            price,
             "Applied",
             "Completed"
         ]
@@ -196,6 +209,8 @@ for item in updates.get("result", []):
             city,
             "Applied"
         )
+
+        answer_callback(callback["id"], "✅ Applied!")
 
         print("Applied processed.")
 
@@ -217,6 +232,8 @@ for item in updates.get("result", []):
             "Rejected"
         )
 
+        answer_callback(callback["id"], "❌ Rejected!")
+
         print("Rejected processed.")
 
     # --------------------------------------------------------
@@ -237,11 +254,18 @@ for item in updates.get("result", []):
             "Saved"
         )
 
+        answer_callback(callback["id"], "📌 Saved!")
+
         print("Saved processed.")
+
+    # --------------------------------------------------------
+    # Unknown action
+    # --------------------------------------------------------
 
     else:
 
         print(f"Unknown action: {action}")
+        answer_callback(callback["id"], "Unknown action.")
 
     processed += 1
 
