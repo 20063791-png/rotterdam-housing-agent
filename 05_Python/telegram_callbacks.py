@@ -33,7 +33,7 @@ tracker = pd.read_csv(TRACKER)
 print(f"Tracker contains {len(tracker)} listings.")
 
 # ------------------------------------------------------------
-# Load application log
+# Load log
 # ------------------------------------------------------------
 
 if LOG.exists():
@@ -65,15 +65,13 @@ print(f"Updates received: {len(updates.get('result', []))}")
 processed = 0
 
 # ------------------------------------------------------------
-# Safe city extractor
+# City helper
 # ------------------------------------------------------------
 
 def get_city(prop):
-    """
-    Return city safely even if tracker has no city column.
-    """
 
     if "city" in tracker.columns:
+
         city = str(prop.get("city", "")).strip()
 
         if city and city.lower() != "nan":
@@ -93,25 +91,19 @@ def get_city(prop):
     return "Unknown"
 
 # ------------------------------------------------------------
-# Telegram helper
+# Callback acknowledgement
 # ------------------------------------------------------------
 
-def answer_callback(callback_id, text="Processing..."):
-    """
-    Safely answer callback so Telegram immediately shows feedback.
-    """
+def answer(callback_id, text):
 
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
-            json={
-                "callback_query_id": callback_id,
-                "text": text
-            },
-            timeout=20
-        )
-    except Exception as e:
-        print(f"Callback acknowledgement failed: {e}")
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+        json={
+            "callback_query_id": callback_id,
+            "text": text
+        },
+        timeout=20
+    )
 
 # ------------------------------------------------------------
 # Process callbacks
@@ -131,23 +123,62 @@ for item in updates.get("result", []):
 
     print(f"Callback data: {data}")
 
-    if "_" not in data:
-        print("Invalid callback format.")
+    action = None
+    prop = None
+
+    # ========================================================
+    # NEW UUID FORMAT
+    # action|listing_id
+    # ========================================================
+
+    if "|" in data:
+
+        action, listing_id = data.split("|", 1)
+
+        print(f"UUID: {listing_id}")
+
+        if "listing_id" not in tracker.columns:
+
+            print("listing_id column missing.")
+            answer(callback["id"], "System needs updating.")
+            continue
+
+        match = tracker[tracker["listing_id"].astype(str) == listing_id]
+
+        if match.empty:
+
+            print("Listing ID not found.")
+            answer(callback["id"], "Listing no longer exists.")
+            continue
+
+        index = match.index[0]
+        prop = tracker.loc[index]
+
+    # ========================================================
+    # OLD INDEX FORMAT
+    # action_index
+    # ========================================================
+
+    elif "_" in data:
+
+        action, index = data.split("_", 1)
+
+        try:
+            index = int(index)
+        except Exception:
+            print("Invalid callback index.")
+            continue
+
+        if index >= len(tracker):
+            print("Index outside tracker.")
+            continue
+
+        prop = tracker.loc[index]
+
+    else:
+
+        print("Unknown callback format.")
         continue
-
-    action, index = data.split("_", 1)
-
-    try:
-        index = int(index)
-    except Exception:
-        print("Invalid callback index.")
-        continue
-
-    if index >= len(tracker):
-        print("Index outside tracker.")
-        continue
-
-    prop = tracker.loc[index]
 
     chat = callback["message"]["chat"]["id"]
     msg = callback["message"]["message_id"]
@@ -155,41 +186,25 @@ for item in updates.get("result", []):
     url = str(prop.get("url", ""))
     title = str(prop.get("title", "Unknown Property"))
     city = get_city(prop)
-    price = prop.get("price", "")
 
     print(f"Listing: {title}")
     print(f"City: {city}")
-    print(f"Current Status: {prop.get('status','')}")
 
-    # --------------------------------------------------------
-    # Immediate acknowledgement
-    # --------------------------------------------------------
+    answer(callback["id"], "Processing...")
 
-    answer_callback(callback["id"], "⏳ Processing...")
+    current = str(prop.get("status", "")).strip()
 
-    current_status = str(prop.get("status", "")).strip()
+    if current in ["Applied", "Rejected"]:
 
-    # --------------------------------------------------------
-    # Prevent duplicate actions
-    # --------------------------------------------------------
-
-    if current_status in ["Applied", "Rejected"]:
-
-        answer_callback(
-            callback["id"],
-            f"Already {current_status.lower()}."
-        )
-
-        print(f"Already {current_status}.")
+        answer(callback["id"], f"Already {current.lower()}.")
+        print("Already completed.")
         continue
 
-    # --------------------------------------------------------
-    # APPLIED
-    # --------------------------------------------------------
+    # ---------------- Applied ----------------
 
     if action == "applied":
 
-        tracker.loc[index, "status"] = "Applied"
+        tracker.loc[prop.name, "status"] = "Applied"
 
         update_listing(url, "Applied")
 
@@ -197,87 +212,55 @@ for item in updates.get("result", []):
             datetime.now().strftime("%Y-%m-%d %H:%M"),
             url,
             title,
-            price,
+            prop.get("price", ""),
             "Applied",
             "Completed"
         ]
 
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Applied"
-        )
+        finish_message(chat, msg, title, city, "Applied")
 
-        answer_callback(callback["id"], "✅ Applied!")
+        answer(callback["id"], "Applied!")
 
-        print("Applied processed.")
-
-    # --------------------------------------------------------
-    # REJECTED
-    # --------------------------------------------------------
-
-    elif action == "reject":
-
-        tracker.loc[index, "status"] = "Rejected"
-
-        update_listing(url, "Rejected")
-
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Rejected"
-        )
-
-        answer_callback(callback["id"], "❌ Rejected!")
-
-        print("Rejected processed.")
-
-    # --------------------------------------------------------
-    # SAVED
-    # --------------------------------------------------------
+    # ---------------- Saved ----------------
 
     elif action == "save":
 
-        tracker.loc[index, "status"] = "Saved"
+        tracker.loc[prop.name, "status"] = "Saved"
 
         update_listing(url, "Saved")
 
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Saved"
-        )
+        finish_message(chat, msg, title, city, "Saved")
 
-        answer_callback(callback["id"], "📌 Saved!")
+        answer(callback["id"], "Saved!")
 
-        print("Saved processed.")
+    # ---------------- Rejected ----------------
 
-    # --------------------------------------------------------
-    # Unknown action
-    # --------------------------------------------------------
+    elif action == "reject":
+
+        tracker.loc[prop.name, "status"] = "Rejected"
+
+        update_listing(url, "Rejected")
+
+        finish_message(chat, msg, title, city, "Rejected")
+
+        answer(callback["id"], "Rejected!")
 
     else:
 
-        print(f"Unknown action: {action}")
-        answer_callback(callback["id"], "Unknown action.")
+        answer(callback["id"], "Unknown action.")
+        continue
 
     processed += 1
 
 # ------------------------------------------------------------
-# Save tracker
+# Save
 # ------------------------------------------------------------
 
 tracker.to_csv(TRACKER, index=False)
 log.to_csv(LOG, index=False)
 
 # ------------------------------------------------------------
-# Clear processed Telegram updates
+# Clear processed updates
 # ------------------------------------------------------------
 
 if updates.get("result"):
