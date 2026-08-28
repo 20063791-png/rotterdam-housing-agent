@@ -5,14 +5,39 @@ import asyncio
 from playwright.async_api import async_playwright
 
 # ==========================================================
-# Telegram Configuration (RESTORED WORKING VERSION)
+# Telegram Configuration (UNCHANGED)
 # ==========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
 CHAT_ID = os.getenv("CHAT_ID") or "8674673640"
 
 # ==========================================================
-# Fast Property Detail Extractor
+# FIX: Get correct city from Pararius URL
+# ==========================================================
+
+def extract_city_from_url(url: str) -> str:
+    """
+    Extract city from Pararius URLs.
+
+    Examples:
+    apartment-for-rent/delft/...      -> Delft
+    room-for-rent/schiedam/...        -> Schiedam
+    house-for-rent/rotterdam/...      -> Rotterdam
+    studio-for-rent/vlaardingen/...   -> Vlaardingen
+    """
+
+    m = re.search(
+        r"/(?:apartment|room|house|studio)-for-rent/([^/]+)/",
+        url.lower()
+    )
+
+    if m:
+        return m.group(1).replace("-", " ").title()
+
+    return "Unknown"
+
+# ==========================================================
+# Fast Property Detail Extractor (UNCHANGED)
 # ==========================================================
 
 async def fetch_listing_details(url):
@@ -97,7 +122,7 @@ async def fetch_listing_details(url):
                 details["summary"].append("Furnished")
 
             elif details["upholstered"]:
-                details["summary"].append("Upolstered")
+                details["summary"].append("Upholstered")
 
             for key, label in keywords.items():
                 if key in lower:
@@ -129,7 +154,7 @@ async def fetch_listing_details(url):
     return details
 
 # ==========================================================
-# AI Message Builder (Erasmus MC Version)
+# AI Message Builder (UNCHANGED)
 # ==========================================================
 
 def build_ai_message(property_data):
@@ -170,6 +195,17 @@ def send_property_alert(property_data, index=0):
         return
 
     details = asyncio.run(fetch_listing_details(property_data["url"]))
+
+    # ------------------------------------------------------
+    # FIX: Always use the city from the URL
+    # ------------------------------------------------------
+
+    city = extract_city_from_url(property_data["url"])
+
+    # Copy property data so AI message also gets correct city
+
+    property_for_ai = property_data.copy()
+    property_for_ai["city"] = city
 
     # Prefer scanner values, fallback to page extraction
 
@@ -217,7 +253,7 @@ def send_property_alert(property_data, index=0):
 <b>{priority}</b>
 
 📍 <b>{property_data['title']}</b>
-🏙 {property_data['city']}
+🏙 {city}
 
 💶 <b>{price}</b>"""
 
@@ -240,13 +276,12 @@ def send_property_alert(property_data, index=0):
     if details["summary"]:
         extras = [
             x for x in details["summary"]
-            if x not in ["Furnished", "Upolstered"]
+            if x not in ["Furnished", "Upholstered"]
         ]
 
         if extras:
             message += "\n\n✨ " + " • ".join(extras)
 
-    # Keep Pararius preview
     message += f"\n\n🔗 {property_data['url']}"
 
     keyboard = {
@@ -263,7 +298,7 @@ def send_property_alert(property_data, index=0):
                 {
                     "text": "✍️ Copy AI Message",
                     "switch_inline_query_current_chat":
-                    build_ai_message(property_data)
+                    build_ai_message(property_for_ai)
                 }
             ],
 
@@ -343,6 +378,6 @@ if __name__ == "__main__":
             "rooms": 2,
             "area": 55,
             "furnished": True,
-            "url": "https://www.pararius.com"
+            "url": "https://www.pararius.com/room-for-rent/delft/test-property"
         }
     )
