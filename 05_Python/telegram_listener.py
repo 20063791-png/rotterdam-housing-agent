@@ -13,26 +13,26 @@ with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
-CHAT_ID = str(os.getenv("CHAT_ID") or cfg["telegram"]["chat_id"])
+CHAT_ID = os.getenv("CHAT_ID") or cfg["telegram"]["chat_id"]
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 tracker = pd.read_csv(TRACKER)
 
-# ------------------------------------------------------------
-# Ensure required columns exist
-# ------------------------------------------------------------
-
-if "telegram_message_id" not in tracker.columns:
-    tracker["telegram_message_id"] = ""
-
-if "status" not in tracker.columns:
-    tracker["status"] = "new"
-
 print("=" * 60)
 print("TELEGRAM LISTENER")
 print("=" * 60)
 print(f"Listings available: {len(tracker)}")
+
+
+def safe(prop, *columns, default=""):
+    """Return the first existing non-empty column."""
+    for col in columns:
+        if col in prop.index:
+            value = prop[col]
+            if pd.notna(value) and str(value).strip() != "":
+                return str(value)
+    return default
 
 
 # ------------------------------------------------------------
@@ -41,15 +41,15 @@ print(f"Listings available: {len(tracker)}")
 
 def send_property(prop):
 
-    property_id = str(prop["property_id"]).strip()
+    property_id = safe(prop, "property_id")
 
-    status = str(prop.get("status", "new")).lower()
+    status = safe(prop, "status", default="new").lower()
 
     if status in ["applied", "rejected"]:
         print(f"Skipping completed listing: {property_id}")
-        return None
+        return False
 
-    score = int(prop.get("score", 0))
+    score = int(float(safe(prop, "score", default="0")))
 
     if score >= 80:
         badge = "🔥 PERFECT MATCH"
@@ -60,22 +60,24 @@ def send_property(prop):
     else:
         badge = "🏠 NEW LISTING"
 
-    address = str(prop.get("address", "")).strip()
-    city = str(prop.get("city", "")).strip()
-    price = str(prop.get("price", "")).strip()
-    rooms = str(prop.get("rooms", "")).strip()
-    area = str(prop.get("area", "")).strip()
-    listing = str(prop.get("listing_url", "")).strip()
+    title = safe(prop, "title", "address", default="Property")
+    city = safe(prop, "city", default="Unknown")
+    price = safe(prop, "price", default="?")
+    rooms = safe(prop, "rooms", default="?")
+    area = safe(prop, "area", default="?")
+    url = safe(prop, "listing_url", "url")
+    photo = safe(prop, "photo_url", "photo")
 
     message = (
         f"🏠 <b>Housing Agent v12</b>\n\n"
         f"{badge}\n\n"
-        f"📍 <b>{address}</b>\n"
+        f"📍 <b>{title}</b>\n"
         f"🏙 {city}\n\n"
         f"💶 €{price}\n"
         f"🛏 {rooms} room\n"
         f"📐 {area} m²\n\n"
-        f"🎯 <b>Score: {score}/100</b>"
+        f"🎯 Score: {score}/100\n\n"
+        f"🔗 {url}"
     )
 
     keyboard = {
@@ -83,7 +85,7 @@ def send_property(prop):
             [
                 {
                     "text": "🏡 Open Listing",
-                    "url": listing
+                    "url": url
                 }
             ],
             [
@@ -111,17 +113,17 @@ def send_property(prop):
         ]
     }
 
-    photo = str(prop.get("photo_url", "")).strip()
-
     print("-" * 50)
     print(f"Sending property: {property_id}")
-    print(f"Photo available: {bool(photo and photo.lower() != 'nan')}")
+    print(f"Title: {title}")
+    print(f"City: {city}")
+    print(f"Photo exists: {bool(photo)}")
 
     # --------------------------------------------------------
-    # Try photo first
+    # Try sending photo
     # --------------------------------------------------------
 
-    if photo and photo.lower() != "nan":
+    if photo:
 
         response = requests.post(
             f"{API}/sendPhoto",
@@ -138,18 +140,17 @@ def send_property(prop):
         print(f"sendPhoto HTTP: {response.status_code}")
 
         try:
-            result = response.json()
-            print(json.dumps(result, indent=2))
+            print(response.json())
         except Exception:
             print(response.text)
 
         if response.ok:
-            return response.json()["result"]["message_id"]
+            return True
 
         print("Photo failed. Falling back to text...")
 
     # --------------------------------------------------------
-    # Fallback text message
+    # Fallback text
     # --------------------------------------------------------
 
     response = requests.post(
@@ -167,15 +168,11 @@ def send_property(prop):
     print(f"sendMessage HTTP: {response.status_code}")
 
     try:
-        result = response.json()
-        print(json.dumps(result, indent=2))
+        print(response.json())
     except Exception:
         print(response.text)
 
-    if response.ok:
-        return response.json()["result"]["message_id"]
-
-    return None
+    return response.ok
 
 
 # ------------------------------------------------------------
@@ -184,19 +181,14 @@ def send_property(prop):
 
 sent = 0
 
-new_rows = tracker[tracker["status"].fillna("new").eq("new")]
+new_rows = tracker[tracker["status"].fillna("new").str.lower().eq("new")]
 
 print(f"Listings to send: {len(new_rows)}")
 
-for idx, prop in new_rows.iterrows():
+for _, prop in new_rows.iterrows():
 
-    message_id = send_property(prop)
-
-    if message_id:
-
-        tracker.loc[idx, "status"] = "sent"
-        tracker.loc[idx, "telegram_message_id"] = str(message_id)
-
+    if send_property(prop):
+        tracker.loc[prop.name, "status"] = "sent"
         sent += 1
 
 tracker.to_csv(TRACKER, index=False)
