@@ -3,6 +3,7 @@ import json
 import requests
 import pandas as pd
 import os
+import re
 from datetime import datetime
 
 from callback_utils import finish_message
@@ -14,16 +15,17 @@ CONFIG = ROOT / "Config/config.json"
 TRACKER = ROOT / "Database/housing_tracker.csv"
 LOG = ROOT / "Database/applications_log.csv"
 
+print("=" * 60)
+print("TELEGRAM CALLBACK HANDLER STARTED")
+print("=" * 60)
+
 with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
 TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
 
-print("=" * 60)
-print("TELEGRAM CALLBACK HANDLER STARTED")
-print("=" * 60)
-
 tracker = pd.read_csv(TRACKER)
+
 print(f"Tracker contains {len(tracker)} listings.")
 
 if LOG.exists():
@@ -38,26 +40,46 @@ else:
         "status"
     ])
 
-# ---------------------------------------------------------
-# Download Telegram updates
-# ---------------------------------------------------------
-
-response = requests.get(
+updates = requests.get(
     f"https://api.telegram.org/bot{TOKEN}/getUpdates",
     timeout=20
-)
+).json()
 
-print(f"Telegram HTTP Status: {response.status_code}")
-
-updates = response.json()
-
+print(f"Telegram HTTP Status: 200")
 print(f"Updates received: {len(updates.get('result', []))}")
 
 processed = 0
 
-# ---------------------------------------------------------
+
+# ------------------------------------------------------------
+# Safe city extractor
+# ------------------------------------------------------------
+
+def get_city(prop):
+    """Return city even if tracker has no city column."""
+
+    if "city" in tracker.columns:
+        city = str(prop.get("city", "")).strip()
+        if city and city.lower() != "nan":
+            return city
+
+    title = str(prop.get("title", ""))
+
+    m = re.search(
+        r"(Rotterdam|Delft|Schiedam|Ridderkerk|Vlaardingen|Barendrecht|Spijkenisse|Dordrecht|Capelle aan den IJssel)",
+        title,
+        re.IGNORECASE
+    )
+
+    if m:
+        return m.group(1)
+
+    return "Unknown"
+
+
+# ------------------------------------------------------------
 # Process callbacks
-# ---------------------------------------------------------
+# ------------------------------------------------------------
 
 for item in updates.get("result", []):
 
@@ -69,11 +91,11 @@ for item in updates.get("result", []):
     print("-" * 50)
     print("Button press detected.")
 
-    data = callback.get("data", "")
+    data = callback["data"]
+
     print(f"Callback data: {data}")
 
     if "_" not in data:
-        print("Invalid callback format.")
         continue
 
     action, index = data.split("_", 1)
@@ -81,28 +103,26 @@ for item in updates.get("result", []):
     try:
         index = int(index)
     except Exception:
-        print("Could not convert callback index.")
         continue
 
     if index >= len(tracker):
-        print(f"Index {index} outside tracker.")
+        print("Index outside tracker.")
         continue
 
     prop = tracker.loc[index]
 
     chat = callback["message"]["chat"]["id"]
     msg = callback["message"]["message_id"]
+
     url = prop["url"]
+    title = str(prop.get("title", "Unknown Property"))
+    city = get_city(prop)
 
-    print(f"Listing: {prop['title']}")
-    print(f"City: {prop['city']}")
-    print(f"Action: {action}")
+    print(f"Listing: {title}")
+    print(f"City: {city}")
 
-    # --------------------------------------------
-    # Immediately acknowledge Telegram button
-    # --------------------------------------------
-
-    ack = requests.post(
+    # Acknowledge button immediately
+    requests.post(
         f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
         json={
             "callback_query_id": callback["id"],
@@ -111,92 +131,83 @@ for item in updates.get("result", []):
         timeout=20
     )
 
-    print(f"Callback acknowledgement: {ack.status_code}")
+    # ---------------- Applied ----------------
 
-    try:
+    if action == "applied":
 
-        if action == "applied":
+        tracker.loc[index, "status"] = "Applied"
 
-            tracker.loc[index, "status"] = "Applied"
+        update_listing(url, "Applied")
 
-            update_listing(url, "Applied")
+        log.loc[len(log)] = [
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            url,
+            prop.get("title", ""),
+            prop.get("price", ""),
+            "Applied",
+            "Completed"
+        ]
 
-            log.loc[len(log)] = [
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                url,
-                prop["title"],
-                prop["price"],
-                "Applied",
-                "Completed"
-            ]
+        finish_message(
+            chat,
+            msg,
+            title,
+            city,
+            "Applied"
+        )
 
-            finish_message(
-                chat,
-                msg,
-                prop["title"],
-                prop["city"],
-                "Applied"
-            )
+        print("Applied processed.")
 
-            print("Applied processed successfully.")
+    # ---------------- Reject ----------------
 
-        elif action == "reject":
+    elif action == "reject":
 
-            tracker.loc[index, "status"] = "Rejected"
+        tracker.loc[index, "status"] = "Rejected"
 
-            update_listing(url, "Rejected")
+        update_listing(url, "Rejected")
 
-            finish_message(
-                chat,
-                msg,
-                prop["title"],
-                prop["city"],
-                "Rejected"
-            )
+        finish_message(
+            chat,
+            msg,
+            title,
+            city,
+            "Rejected"
+        )
 
-            print("Rejected processed successfully.")
+        print("Rejected processed.")
 
-        elif action == "save":
+    # ---------------- Save ----------------
 
-            tracker.loc[index, "status"] = "Saved"
+    elif action == "save":
 
-            update_listing(url, "Saved")
+        tracker.loc[index, "status"] = "Saved"
 
-            finish_message(
-                chat,
-                msg,
-                prop["title"],
-                prop["city"],
-                "Saved"
-            )
+        update_listing(url, "Saved")
 
-            print("Saved processed successfully.")
+        finish_message(
+            chat,
+            msg,
+            title,
+            city,
+            "Saved"
+        )
 
-        else:
-
-            print(f"Unknown action: {action}")
-
-    except Exception as e:
-
-        print(f"ERROR processing callback: {e}")
+        print("Saved processed.")
 
     processed += 1
 
-# ---------------------------------------------------------
-# Save database
-# ---------------------------------------------------------
+# ------------------------------------------------------------
+# Save databases
+# ------------------------------------------------------------
 
 tracker.to_csv(TRACKER, index=False)
 log.to_csv(LOG, index=False)
 
-print(f"Processed callbacks: {processed}")
-
-# ---------------------------------------------------------
+# ------------------------------------------------------------
 # Clear processed Telegram updates
-# ---------------------------------------------------------
+# ------------------------------------------------------------
 
 if updates.get("result"):
-
     last = max(u["update_id"] for u in updates["result"])
 
     requests.get(
@@ -205,8 +216,6 @@ if updates.get("result"):
         timeout=20
     )
 
-    print(f"Offset advanced to {last+1}")
-
-print("=" * 60)
-print("CALLBACK HANDLER FINISHED")
+print("-" * 50)
+print(f"Processed {processed} callbacks.")
 print("=" * 60)
