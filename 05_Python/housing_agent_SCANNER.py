@@ -127,6 +127,40 @@ def score_listing(city, text="", price_value=0, rooms=0, area=0):
     return min(score, 100)
 
 # ==========================================================
+# Real city detection (ONLY NEW PATCH)
+# ==========================================================
+
+async def get_listing_city(page, default_city):
+    """
+    Reads the actual city from the listing page.
+    Falls back to the search city if not found.
+    """
+
+    try:
+        body = (await page.text_content("body") or "").lower()
+
+        cities = [
+            "rotterdam",
+            "schiedam",
+            "delft",
+            "capelle aan den ijssel",
+            "vlaardingen",
+            "barendrecht",
+            "ridderkerk",
+            "spijkenisse",
+            "dordrecht"
+        ]
+
+        for city_name in cities:
+            if city_name in body:
+                return city_name.title()
+
+    except Exception:
+        pass
+
+    return default_city
+
+# ==========================================================
 # Scan one city
 # ==========================================================
 
@@ -142,7 +176,7 @@ async def scan_city(browser, city):
 
     slug = city.lower().replace(" ", "-")
 
-    # NEW: scan all property categories
+    # Search every property category
     search_urls = [
 
         f"{BASE}/apartments/{slug}",
@@ -187,13 +221,13 @@ async def scan_city(browser, city):
 
                         link = href if href.startswith("http") else BASE + href
 
-                        # Prevent duplicates across categories
                         if link in seen:
                             continue
 
                         seen.add(link)
 
                         # Keep exactly the same extraction logic
+
                         container = card.locator("xpath=ancestor::section[1]")
 
                         if await container.count() == 0:
@@ -238,16 +272,19 @@ async def scan_city(browser, city):
                         if m:
                             area = int(m.group(1))
 
+                        # ONLY CHANGE: detect the real city
+                        real_city = await get_listing_city(page, city)
+
                         listings.append({
 
-                            "city": city,
+                            "city": real_city,
                             "title": title,
                             "price": price,
                             "price_value": price_value,
                             "rooms": rooms,
                             "area": area,
                             "score": score_listing(
-                                city,
+                                real_city,
                                 text,
                                 price_value,
                                 rooms,
@@ -261,7 +298,7 @@ async def scan_city(browser, city):
                         continue
 
             except:
-                # Some cities may not have all categories
+                # Some cities simply won't have all categories.
                 continue
 
         print(f"✓ {city}: {len(listings)} listings")
