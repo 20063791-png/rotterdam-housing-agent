@@ -19,6 +19,10 @@ print("=" * 60)
 print("TELEGRAM CALLBACK HANDLER STARTED")
 print("=" * 60)
 
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+
 with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
@@ -27,6 +31,10 @@ TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
 tracker = pd.read_csv(TRACKER)
 
 print(f"Tracker contains {len(tracker)} listings.")
+
+# ------------------------------------------------------------
+# Load application log
+# ------------------------------------------------------------
 
 if LOG.exists():
     log = pd.read_csv(LOG)
@@ -40,33 +48,41 @@ else:
         "status"
     ])
 
-updates = requests.get(
+# ------------------------------------------------------------
+# Read Telegram updates
+# ------------------------------------------------------------
+
+response = requests.get(
     f"https://api.telegram.org/bot{TOKEN}/getUpdates",
     timeout=20
-).json()
+)
 
-print(f"Telegram HTTP Status: 200")
+updates = response.json()
+
+print(f"Telegram HTTP Status: {response.status_code}")
 print(f"Updates received: {len(updates.get('result', []))}")
 
 processed = 0
-
 
 # ------------------------------------------------------------
 # Safe city extractor
 # ------------------------------------------------------------
 
 def get_city(prop):
-    """Return city even if tracker has no city column."""
+    """
+    Return city safely even if tracker has no city column.
+    """
 
     if "city" in tracker.columns:
         city = str(prop.get("city", "")).strip()
+
         if city and city.lower() != "nan":
             return city
 
     title = str(prop.get("title", ""))
 
     m = re.search(
-        r"(Rotterdam|Delft|Schiedam|Ridderkerk|Vlaardingen|Barendrecht|Spijkenisse|Dordrecht|Capelle aan den IJssel)",
+        r"(Rotterdam|Schiedam|Delft|Ridderkerk|Vlaardingen|Barendrecht|Spijkenisse|Dordrecht|Capelle aan den IJssel)",
         title,
         re.IGNORECASE
     )
@@ -75,7 +91,6 @@ def get_city(prop):
         return m.group(1)
 
     return "Unknown"
-
 
 # ------------------------------------------------------------
 # Process callbacks
@@ -103,6 +118,7 @@ for item in updates.get("result", []):
     try:
         index = int(index)
     except Exception:
+        print("Invalid callback index.")
         continue
 
     if index >= len(tracker):
@@ -121,7 +137,10 @@ for item in updates.get("result", []):
     print(f"Listing: {title}")
     print(f"City: {city}")
 
-    # Acknowledge button immediately
+    # --------------------------------------------------------
+    # Immediate Telegram acknowledgement
+    # --------------------------------------------------------
+
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
         json={
@@ -131,7 +150,29 @@ for item in updates.get("result", []):
         timeout=20
     )
 
-    # ---------------- Applied ----------------
+    current_status = str(prop.get("status", "")).strip()
+
+    # --------------------------------------------------------
+    # Prevent duplicate processing
+    # --------------------------------------------------------
+
+    if current_status in ["Applied", "Rejected"]:
+
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+            json={
+                "callback_query_id": callback["id"],
+                "text": f"Already {current_status.lower()}."
+            },
+            timeout=20
+        )
+
+        print(f"Already {current_status}.")
+        continue
+
+    # --------------------------------------------------------
+    # APPLIED
+    # --------------------------------------------------------
 
     if action == "applied":
 
@@ -142,7 +183,7 @@ for item in updates.get("result", []):
         log.loc[len(log)] = [
             datetime.now().strftime("%Y-%m-%d %H:%M"),
             url,
-            prop.get("title", ""),
+            title,
             prop.get("price", ""),
             "Applied",
             "Completed"
@@ -158,7 +199,9 @@ for item in updates.get("result", []):
 
         print("Applied processed.")
 
-    # ---------------- Reject ----------------
+    # --------------------------------------------------------
+    # REJECTED
+    # --------------------------------------------------------
 
     elif action == "reject":
 
@@ -176,7 +219,9 @@ for item in updates.get("result", []):
 
         print("Rejected processed.")
 
-    # ---------------- Save ----------------
+    # --------------------------------------------------------
+    # SAVED
+    # --------------------------------------------------------
 
     elif action == "save":
 
@@ -194,10 +239,14 @@ for item in updates.get("result", []):
 
         print("Saved processed.")
 
+    else:
+
+        print(f"Unknown action: {action}")
+
     processed += 1
 
 # ------------------------------------------------------------
-# Save databases
+# Save tracker
 # ------------------------------------------------------------
 
 tracker.to_csv(TRACKER, index=False)
@@ -208,6 +257,7 @@ log.to_csv(LOG, index=False)
 # ------------------------------------------------------------
 
 if updates.get("result"):
+
     last = max(u["update_id"] for u in updates["result"])
 
     requests.get(
