@@ -8,8 +8,8 @@ from playwright.async_api import async_playwright
 # Telegram Configuration (RESTORED WORKING VERSION)
 # ==========================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN"
-CHAT_ID = os.getenv("CHAT_ID") or "YOUR_CHAT_ID"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8963641889:AAG15IE0gjF5huojqXffVcToO6_kGoA0RLc"
+CHAT_ID = os.getenv("CHAT_ID") or "8674673640"
 
 # ==========================================================
 # Fast Property Detail Extractor
