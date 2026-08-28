@@ -30,6 +30,13 @@ TOKEN = os.getenv("BOT_TOKEN") or cfg["telegram"]["bot_token"]
 
 tracker = pd.read_csv(TRACKER)
 
+# Ensure required columns exist
+if "status" not in tracker.columns:
+    tracker["status"] = "new"
+
+if "telegram_message_id" not in tracker.columns:
+    tracker["telegram_message_id"] = ""
+
 print(f"Tracker contains {len(tracker)} listings.")
 
 # ------------------------------------------------------------
@@ -50,7 +57,7 @@ else:
     ])
 
 # ------------------------------------------------------------
-# Telegram updates
+# Read Telegram updates
 # ------------------------------------------------------------
 
 response = requests.get(
@@ -101,15 +108,12 @@ for item in updates.get("result", []):
     if callback is None:
         continue
 
-    print("-" * 50)
-    print("Button press detected.")
+    print("-" * 60)
+    print("BUTTON PRESS DETECTED")
 
     data = callback["data"]
 
     print(f"Callback data: {data}")
-
-    # NEW FORMAT:
-    # applied|08c06a37
 
     if "|" not in data:
         print("Invalid callback format.")
@@ -118,12 +122,13 @@ for item in updates.get("result", []):
     action, property_id = data.split("|", 1)
 
     # --------------------------------------------------------
-    # Find listing by property_id
+    # Find listing
     # --------------------------------------------------------
 
-    match = tracker[tracker["property_id"] == property_id]
+    match = tracker[tracker["property_id"].astype(str) == property_id]
 
     if match.empty:
+
         print(f"Property not found: {property_id}")
 
         requests.post(
@@ -144,14 +149,13 @@ for item in updates.get("result", []):
     msg = callback["message"]["message_id"]
 
     title = str(prop.get("title", "Unknown Property"))
-
     city = get_city(prop)
+    url = str(prop.get("listing_url", prop.get("url", "")))
 
-    url = prop.get("listing_url", prop.get("url", ""))
-
-    print(f"Property ID: {property_id}")
-    print(f"Listing: {title}")
-    print(f"City: {city}")
+    print(f"Property ID : {property_id}")
+    print(f"Message ID  : {msg}")
+    print(f"Title       : {title}")
+    print(f"City        : {city}")
 
     # --------------------------------------------------------
     # Immediate acknowledgement
@@ -161,14 +165,20 @@ for item in updates.get("result", []):
         f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
         json={
             "callback_query_id": callback["id"],
-            "text": "Processing..."
+            "text": "Working..."
         },
         timeout=20
     )
 
-    current_status = str(prop.get("status", "")).strip()
+    current_status = str(prop.get("status", "new")).strip()
 
-    if current_status in ["Applied", "Rejected"]:
+    # --------------------------------------------------------
+    # Prevent duplicate actions
+    # --------------------------------------------------------
+
+    if action in ["applied", "reject"] and current_status in ["Applied", "Rejected"]:
+
+        print(f"Already {current_status}")
 
         requests.post(
             f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
@@ -182,14 +192,35 @@ for item in updates.get("result", []):
         continue
 
     # --------------------------------------------------------
-    # APPLIED
+    # Decide new status
     # --------------------------------------------------------
 
     if action == "applied":
+        new_status = "Applied"
 
-        tracker.loc[index, "status"] = "Applied"
+    elif action == "reject":
+        new_status = "Rejected"
 
-        update_listing(url, "Applied")
+    elif action == "save":
+        new_status = "Saved"
+
+    else:
+        print(f"Unknown action: {action}")
+        continue
+
+    # --------------------------------------------------------
+    # Update tracker immediately
+    # --------------------------------------------------------
+
+    tracker.loc[index, "status"] = new_status
+
+    update_listing(url, new_status)
+
+    # --------------------------------------------------------
+    # Log applications
+    # --------------------------------------------------------
+
+    if new_status == "Applied":
 
         log.loc[len(log)] = [
             datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -201,65 +232,32 @@ for item in updates.get("result", []):
             "Completed"
         ]
 
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Applied"
-        )
-
-        print("Applied processed.")
-
     # --------------------------------------------------------
-    # REJECT
+    # Edit Telegram message
     # --------------------------------------------------------
 
-    elif action == "reject":
+    print("Editing Telegram message...")
 
-        tracker.loc[index, "status"] = "Rejected"
+    success = finish_message(
+        chat,
+        msg,
+        title,
+        city,
+        new_status
+    )
 
-        update_listing(url, "Rejected")
+    if success:
 
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Rejected"
-        )
-
-        print("Rejected processed.")
-
-    # --------------------------------------------------------
-    # SAVE
-    # --------------------------------------------------------
-
-    elif action == "save":
-
-        tracker.loc[index, "status"] = "Saved"
-
-        update_listing(url, "Saved")
-
-        finish_message(
-            chat,
-            msg,
-            title,
-            city,
-            "Saved"
-        )
-
-        print("Saved processed.")
+        print(f"SUCCESS: {new_status}")
 
     else:
 
-        print(f"Unknown action: {action}")
-        continue
+        print("WARNING: Message edit failed.")
 
     processed += 1
 
 # ------------------------------------------------------------
-# Save tracker
+# Save databases
 # ------------------------------------------------------------
 
 tracker.to_csv(TRACKER, index=False)
@@ -279,6 +277,6 @@ if updates.get("result"):
         timeout=20
     )
 
-print("-" * 50)
-print(f"Processed {processed} callbacks.")
+print("-" * 60)
+print(f"Processed callbacks: {processed}")
 print("=" * 60)
